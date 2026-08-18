@@ -10,7 +10,7 @@ import requests
 
 from config import (
     PIPE17_API_BASE, PIPE17_API_KEY, PIPE17_AUTH_HEADER,
-    PIPE17_SHIPMENTS_PATH, PIPE17_ORDERS_PATH,
+    PIPE17_SHIPMENTS_PATH, PIPE17_ORDERS_PATH, PIPE17_SINCE_PARAM,
 )
 
 HEADERS = {PIPE17_AUTH_HEADER: PIPE17_API_KEY, "Accept": "application/json"}
@@ -33,7 +33,7 @@ def _iter(path, list_key, updated_since_iso, page_size=100):
     skip = 0
     while True:
         data = _get(path, params={
-            "updatedSince": updated_since_iso,
+            PIPE17_SINCE_PARAM: updated_since_iso,
             "count": page_size,
             "skip": skip,
             "keys": "*",

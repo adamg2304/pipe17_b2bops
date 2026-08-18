@@ -11,7 +11,7 @@ import logging
 import sys
 
 from config import (
-    SYNC_LOOKBACK_MINUTES, SYNC_ORDERS,
+    SYNC_LOOKBACK_MINUTES, SYNC_ORDERS, DRY_RUN,
     ORDERS_TABLE, SHIPMENTS_TABLE,
     ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD,
 )
@@ -54,7 +54,14 @@ def main():
         log.warning("%d/%d shipments had no matching Order row (Order Link left empty)",
                     len(shipments) - linked, len(shipments))
 
-    if shipments:
+    if shipments and DRY_RUN:
+        import json
+        log.warning("DRY_RUN=true — NOT writing to Airtable. Mapped payload below:")
+        for f in shipments:
+            log.info("  %s", json.dumps(f, ensure_ascii=False))
+        log.info("DRY_RUN: %d shipments would be upserted (%d linked to an Order).",
+                 len(shipments), linked)
+    elif shipments:
         created, updated = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
         log.info("Shipments upserted: %d created, %d updated", created, updated)
 

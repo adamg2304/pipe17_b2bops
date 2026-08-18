@@ -12,10 +12,15 @@ them with Cloud Run `--set-secrets` pinned to `:latest` (NOT `:1`).
 import os
 
 # --- Pipe17 -----------------------------------------------------------------
-PIPE17_API_BASE = os.environ.get("PIPE17_API_BASE", "https://api.pipe17.com/v1")
+PIPE17_API_BASE = os.environ.get("PIPE17_API_BASE", "https://api-v3.pipe17.com/api/v3")
 PIPE17_API_KEY = os.environ["PIPE17_API_KEY"]
-# Pipe17 auth header. VERIFY against your API creds — commonly "X-Api-Key".
-PIPE17_AUTH_HEADER = os.environ.get("PIPE17_AUTH_HEADER", "X-Api-Key")
+# Pipe17 auth header. CONFIRMED from Pipe17 docs + help center: custom header
+# "X-Pipe17-Key" (NOT Authorization, NOT X-Api-Key).
+PIPE17_AUTH_HEADER = os.environ.get("PIPE17_AUTH_HEADER", "X-Pipe17-Key")
+# Incremental-read param name. Pipe17 examples show "since" on some resources and
+# "updatedSince" on others. Confirm which /shipments accepts (see selftest notes),
+# then override via env if needed. This is the last transport unknown.
+PIPE17_SINCE_PARAM = os.environ.get("PIPE17_SINCE_PARAM", "updatedSince")
 # Pipe17 calls shipping requests "shipments" in the REST API (response key "shipments").
 PIPE17_SHIPMENTS_PATH = os.environ.get("PIPE17_SHIPMENTS_PATH", "/shipments")
 PIPE17_ORDERS_PATH = os.environ.get("PIPE17_ORDERS_PATH", "/orders")
@@ -26,6 +31,10 @@ SYNC_LOOKBACK_MINUTES = int(os.environ.get("SYNC_LOOKBACK_MINUTES", "60"))
 # created upstream (HubSpot/Shopify) and we only link to them. Flip on if Pipe17
 # should own the parent Order too. (Open question — confirm vs skubana behavior.)
 SYNC_ORDERS = os.environ.get("SYNC_ORDERS", "false").lower() == "true"
+# Dry run: fetch + map + resolve links + LOG everything, but write NOTHING to
+# Airtable. The safe on-ramp for the first real run once creds exist. Default ON so
+# a misconfigured deploy can never write to the live base by accident.
+DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 
 # --- Airtable ---------------------------------------------------------------
 AIRTABLE_API_KEY = os.environ["AIRTABLE_API_KEY"]
@@ -73,7 +82,9 @@ STATUS_MAP = {
 DEFAULT_SHIPMENT_STATUS = None
 
 # --- Shipment number nomenclature -------------------------------------------
-# Pipe17 splits use a dot (#TestCA1040.2); the Airtable base parses skubana's
-# parenthesis form (#TestCA1040(2)). Keep True so existing formulas/automations
-# ("Parent Order (FX)", "Child / Parent - Relational Database") keep working.
-NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "true").lower() == "true"
+# DECISION (reversed): do NOT normalize. Keep Pipe17's raw dot form (#TestCA1040.2)
+# in Airtable so shipment ids round-trip back to Pipe17 cleanly. Instead the Airtable
+# "Parent Order (FX)" formula was made delimiter-agnostic (handles "(" or "." or bare),
+# so existing formulas/automations keep working without a data transformation.
+# Left as a flag for optionality, but default OFF.
+NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false").lower() == "true"

@@ -19,7 +19,7 @@ Wired to live schemas (verified 2026-08-18 against order **#TestCA1040**, 6 spli
 ## Field map (Pipe17 shipping request -> Airtable Shipments)
 | Airtable field (Shipments) | Pipe17 source | Notes |
 |---|---|---|
-| Shipment Number *(primary, merge key)* | `extShipmentId` | **normalized** `.N` -> `(N)` to match the base's skubana convention |
+| Shipment Number *(primary, merge key)* | `extShipmentId` | **raw dot form kept** (`#TestCA1040.2`); Airtable "Parent Order (FX)" is delimiter-agnostic |
 | Order Link | `extOrderId` -> Orders lookup | recordId resolved in main.py |
 | Origin WH *(select)* | `locationId` via `LOCATION_MAP` | Mississauga confirmed; fill the rest |
 | Status *(select)* | `status` via `STATUS_MAP` | Ops-flow field, not 1:1 — **confirm with Drew** |
@@ -29,12 +29,26 @@ Wired to live schemas (verified 2026-08-18 against order **#TestCA1040**, 6 spli
 | Line Items | `lineItems[]` | `"7 x 11-01-00-50 - Ergonomic Chair …"` (per-split qty) |
 | Shipment Creation Date | `createdAt` | date only |
 
-## Nomenclature (important)
-Pipe17 numbers splits with a dot (`#TestCA1040.2`); the Airtable base parses skubana's
-parenthesis form (`#TestCA1040(2)`) in the **Parent Order (FX)** formula and the
-**Child / Parent - Relational Database** automation. The sync therefore normalizes
-`.N` -> `(N)` (`NORMALIZE_SHIPMENT_NUMBER=true`) so all existing formulas/automations keep
-working. First split stays bare (`#TestCA1040`), which the existing formula handles.
+## Nomenclature (decision: keep raw)
+Pipe17 numbers splits with a dot (`#TestCA1040.2`). We keep that raw so ids round-trip
+back to Pipe17 cleanly (no `.N` -> `(N)` transformation). Instead the Airtable
+**Parent Order (FX)** formula was made delimiter-agnostic (handles `(`, `.`, or bare),
+so the **Child / Parent - Relational Database** automation keeps working unchanged.
+`NORMALIZE_SHIPMENT_NUMBER` defaults **false** and stays off.
+
+Delimiter-agnostic Parent Order (FX):
+```
+IF({Shipment Number}="","",LEFT({Shipment Number},MIN(IF(FIND("(",{Shipment Number})=0,LEN({Shipment Number})+1,FIND("(",{Shipment Number})),IF(FIND(".",{Shipment Number})=0,LEN({Shipment Number})+1,FIND(".",{Shipment Number})))-1))
+```
+
+## Test offline (no GCP, no creds)
+```bash
+PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest.py
+```
+Runs the real transform over `fixtures/testca1040.json` (6 splits) and asserts the raw
+form is preserved, all splits parse to `#TestCA1040`, and unmapped WH / unknown status
+are left blank (no junk select options). `DRY_RUN` defaults **true**: a real run logs the
+mapped payload and writes nothing until you set `DRY_RUN=false`.
 
 ## Confirm before prod
 - [ ] **Status mapping** (`STATUS_MAP`) — the Ops-flow labels are best-guess; Drew/Ops own this.
@@ -42,8 +56,10 @@ working. First split stays bare (`#TestCA1040`), which the existing formula hand
       or is it created upstream (HubSpot/Shopify) and we only link? Confirm vs skubana. If Pipe17
       should own it, map the order payload and enable.
 - [ ] **`LOCATION_MAP`** — add every `locationId` -> Origin WH option (run Pipe17 list-locations).
-- [ ] **Pipe17 transport** — `PIPE17_AUTH_HEADER` and that shipping requests are at `/shipments`.
-      (Field names are already confirmed from live data.)
+- [x] **Pipe17 transport** — CONFIRMED: base `https://api-v3.pipe17.com/api/v3`, header
+      `X-Pipe17-Key`, shipping requests at `/shipments`. Last unknown: the incremental
+      param name (`PIPE17_SINCE_PARAM`, default `updatedSince`) and pagination shape.
+      Confirm both with the curl in NEXT_STEPS, then override env if needed.
 - [ ] **Idempotency key** — we merge on the human Shipment Number, mirroring skubana. If Pipe17 ever
       reissues `extShipmentId`, add a dedicated "Pipe17 Shipment ID" field (= `shipmentId`) and merge on that.
 

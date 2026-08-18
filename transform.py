@@ -3,11 +3,11 @@
 Mirrors the skubana-era Shipments shape. The Order Link (parent) is resolved and
 injected in main.py, because it needs the parent Order's Airtable recordId.
 
-NOMENCLATURE: Pipe17 numbers splits with a dot (#TestCA1040.2), but the Airtable
-base was built for skubana's parenthesis convention (#TestCA1040(2)) — the
-"Parent Order (FX)" formula and the "Child / Parent - Relational Database"
-automation both parse on "(". So we normalize .N -> (N) before writing, which lets
-every existing formula/automation keep working unchanged.
+NOMENCLATURE (decision, reversed): keep Pipe17's raw dot form (#TestCA1040.2) so ids
+round-trip to Pipe17 cleanly. The Airtable "Parent Order (FX)" formula was made
+delimiter-agnostic (handles "(" or "." or bare), so no data transformation is needed
+and every existing formula/automation keeps working. normalize_shipment_number is
+retained behind NORMALIZE_SHIPMENT_NUMBER (default False) for optionality only.
 """
 import re
 
@@ -39,7 +39,7 @@ def shipment_to_airtable(sr):
     name = " ".join(x for x in [addr.get("firstName"), addr.get("lastName")] if x).strip()
 
     fields = {
-        # Primary / merge key: normalized to skubana paren shape.
+        # Primary / merge key: raw Pipe17 dot form by default (normalization off).
         "Shipment Number": normalize_shipment_number(sr.get("extShipmentId")),
         "Customer Name": name or None,
         "Delivery Address": addr.get("address1"),
