@@ -6,6 +6,11 @@ Wired to the live schemas discovered on 2026-08-18:
   - Shipments  table  tblp2rEKFhMvwFdtw  (primary: "Shipment Number")
   - Pipe17 shipping-request payload confirmed against order #TestCA1040 (6 splits).
 
+Writes are keyed by Airtable FIELD IDs (pulled from the live base 2026-09-03) so a
+column rename in the Airtable UI can never silently break the sync. The ONE exception
+is the parent-order lookup (ORDER_NUMBER_FIELD): Airtable's REST filterByFormula only
+accepts field NAMES, never IDs, so that stays a name by necessity.
+
 Secrets (PIPE17_API_KEY, AIRTABLE_API_KEY) come from the environment. On GCP inject
 them with Cloud Run `--set-secrets` pinned to `:latest` (NOT `:1`).
 """
@@ -42,11 +47,53 @@ AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appYsxq2ZGOz2z5ND")
 ORDERS_TABLE = os.environ.get("ORDERS_TABLE", "tbltJfWGsMAeijlV2")
 SHIPMENTS_TABLE = os.environ.get("SHIPMENTS_TABLE", "tblp2rEKFhMvwFdtw")
 
-# Primary fields used as upsert merge keys.
-ORDER_NUMBER_FIELD = "Order Number"        # Orders primary
-SHIPMENT_NUMBER_FIELD = "Shipment Number"  # Shipments primary
-# Link field on Shipments -> Orders.
-SHIPMENT_ORDER_LINK_FIELD = "Order Link"   # fldS43vViZGpbffFJ (multipleRecordLinks)
+# --- Airtable field IDs (immutable — survive UI renames) --------------------
+# Pulled from the live base 2026-09-03. Every write and the upsert merge key use
+# these IDs. Do NOT swap them back to names.
+#
+# Shipments (tblp2rEKFhMvwFdtw)
+F_SHIPMENT_NUMBER        = "fldAo9nWuRVj9lG7p"  # singleLineText — primary / merge key
+F_ORDER_LINK             = "fldS43vViZGpbffFJ"  # multipleRecordLinks -> Orders
+F_ORIGIN_WH              = "fldlOvl9BxQsoEow9"  # singleSelect (gated by LOCATION_MAP)
+F_STATUS                 = "fldn5soXXtCFKA3K1"  # singleSelect (gated by STATUS_MAP)
+F_CUSTOMER_NAME          = "fldNDEpstqH42sQkl"  # singleLineText
+F_DELIVERY_ADDRESS       = "fldxhQ2SUEGDvOHS8"  # singleLineText
+F_CITY                   = "fldXNEOFLrJL6ag5d"  # singleLineText
+F_ZIP_CODE               = "fldh4QCyKa6JFI1wQ"  # singleLineText
+F_STATE                  = "fldxyu1jGoYMS1rA5"  # singleSelect (!) — typecast risk, see transform.py
+F_CUSTOMER_EMAIL         = "fldH76ux37k5Hmhnw"  # email
+F_LINE_ITEMS             = "fldrmuH8qsLeBDAtr"  # singleLineText
+F_SHIPMENT_CREATION_DATE = "fldAR0iUA9liD09QA"  # date
+#
+# Orders (tbltJfWGsMAeijlV2)
+F_ORDER_NUMBER           = "fldE5XFShmJ2VZOzV"  # singleLineText — primary
+
+# Human labels for the field IDs above — handy for readable DRY_RUN logs / debugging.
+FIELD_LABELS = {
+    F_SHIPMENT_NUMBER: "Shipment Number",
+    F_ORDER_LINK: "Order Link",
+    F_ORIGIN_WH: "Origin WH",
+    F_STATUS: "Status",
+    F_CUSTOMER_NAME: "Customer Name",
+    F_DELIVERY_ADDRESS: "Delivery Address",
+    F_CITY: "City",
+    F_ZIP_CODE: "Zip Code",
+    F_STATE: "State",
+    F_CUSTOMER_EMAIL: "Customer Email",
+    F_LINE_ITEMS: "Line Items",
+    F_SHIPMENT_CREATION_DATE: "Shipment Creation Date",
+}
+
+# Merge key + link field consumed by main.py (now FIELD IDs, not names).
+SHIPMENT_NUMBER_FIELD = F_SHIPMENT_NUMBER
+SHIPMENT_ORDER_LINK_FIELD = F_ORDER_LINK
+
+# Parent-order lookup field — NAME, not ID, DELIBERATELY.
+# Airtable's REST filterByFormula (used by find_record_id) only accepts field NAMES,
+# never field IDs — confirmed in Airtable's own API docs. This is the single place a
+# name is unavoidable. It's the Orders primary field (least likely to be renamed);
+# add an Airtable field description on "Order Number" noting this sync depends on it.
+ORDER_NUMBER_FIELD = "Order Number"
 
 # --- locationId -> Shipments "Origin WH" single-select option ---------------
 # Confirmed: Mississauga. Fill the rest from Pipe17 list-locations (values must match
