@@ -1,0 +1,46 @@
+{
+  "shipments": [
+    {"extShipmentId": "#TestCA1040", "extOrderId": "#TestCA1040", "locationId": "fcf8381c1cffc669",
+     "status": "readyToShip", "createdAt": "2026-08-18T14:05:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 7, "sku": "11-01-00-50", "name": "Ergonomic Chair"}]},
+
+    {"extShipmentId": "#TestCA1040.2", "extOrderId": "#TestCA1040", "locationId": "fcf8381c1cffc669",
+     "status": "shipped", "createdAt": "2026-08-18T14:06:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 1, "sku": "88-01-10-88", "name": "Conference Table - Full Frame"},
+                   {"quantity": 4, "sku": "88-03-00-99", "name": "Leg - White / CP 4"}]},
+
+    {"extShipmentId": "#TestCA1040.3", "extOrderId": "#TestCA1040", "locationId": "fcf8381c1cffc669",
+     "status": "delivered", "createdAt": "2026-08-18T14:07:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 2, "sku": "13-46-00-16", "name": "Ergonomic Pro Headrest"}]},
+
+    {"extShipmentId": "#TestCA1040.4", "extOrderId": "#TestCA1040", "locationId": "fcf8381c1cffc669",
+     "status": "new", "createdAt": "2026-08-18T14:08:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 1, "sku": "13-82-00-70", "name": "Adjustable Footrest - Walnut"}]},
+
+    {"extShipmentId": "#TestCA1040.5", "extOrderId": "#TestCA1040", "locationId": "UNMAPPED_LOC_9999",
+     "status": "readyToShip", "createdAt": "2026-08-18T14:09:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 1, "sku": "14-06-00-99", "name": "Filing Cabinet"}]},
+
+    {"extShipmentId": "#TestCA1040.6", "extOrderId": "#TestCA1040", "locationId": "fcf8381c1cffc669",
+     "status": "someUnknownStatus", "createdAt": "2026-08-18T14:10:00Z",
+     "shippingAddress": {"firstName": "Test", "lastName": "Buyer", "address1": "189 Nicholas Street",
+       "city": "Quinte West", "stateOrProvince": "ON", "zipCodeOrPostalCode": "K8V 6E8",
+       "email": "dana.williams@branchfurniture.com"},
+     "lineItems": [{"quantity": 1, "sku": "11-10-00-10", "name": "Verve task chair"}]}
+  ]
+}

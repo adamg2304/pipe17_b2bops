@@ -5,8 +5,9 @@ exact Airtable field dicts the sync would upsert, plus the Parent Order that the
 Airtable "Parent Order (FX)" formula will derive from each Shipment Number. Proves
 the mapping + the delimiter-agnostic parse before any deploy.
 
+Reads transform output by FIELD ID (the sync writes field-ID keys, not names).
+
 Run:  PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest.py
-(the two keys are only read so config imports cleanly; nothing is called with them)
 """
 import json
 import os
@@ -16,7 +17,10 @@ os.environ.setdefault("PIPE17_API_KEY", "selftest")
 os.environ.setdefault("AIRTABLE_API_KEY", "selftest")
 
 from transform import shipment_to_airtable, order_number_of  # noqa: E402
-from config import NORMALIZE_SHIPMENT_NUMBER  # noqa: E402
+from config import (  # noqa: E402
+    NORMALIZE_SHIPMENT_NUMBER,
+    F_SHIPMENT_NUMBER, F_ORIGIN_WH, F_STATUS, F_LINE_ITEMS,
+)
 
 
 def parent_order_fx(shipment_number: str) -> str:
@@ -27,7 +31,7 @@ def parent_order_fx(shipment_number: str) -> str:
         return ""
     def pos(ch):
         i = s.find(ch)
-        return len(s) + 1 if i == -1 else i + 1   # Airtable FIND: 1-indexed, 0 if absent -> len+1
+        return len(s) + 1 if i == -1 else i + 1
     cut = min(pos("("), pos(".")) - 1
     return s[:max(0, cut)]
 
@@ -44,11 +48,10 @@ def main():
     failures = []
     for sr in srs:
         f = shipment_to_airtable(sr)
-        sn = f.get("Shipment Number", "")
+        sn = f.get(F_SHIPMENT_NUMBER, "")
         parent = parent_order_fx(sn)
-        print(f"{sn:<18}{parent:<20}{f.get('Origin WH','(blank)'):<28}{f.get('Status','(blank)'):<12}{f.get('Line Items','')}")
+        print(f"{sn:<18}{parent:<20}{f.get(F_ORIGIN_WH,'(blank)'):<28}{f.get(F_STATUS,'(blank)'):<12}{f.get(F_LINE_ITEMS,'')}")
 
-        # assertions
         if NORMALIZE_SHIPMENT_NUMBER:
             failures.append("normalization should be OFF")
         if sn != sr["extShipmentId"]:
@@ -58,12 +61,11 @@ def main():
         if order_number_of(sr) != "#TestCA1040":
             failures.append(f"{sn}: order link key wrong")
 
-    # targeted edge checks
     unmapped = next(s for s in srs if s["locationId"] == "UNMAPPED_LOC_9999")
-    if "Origin WH" in shipment_to_airtable(unmapped):
+    if F_ORIGIN_WH in shipment_to_airtable(unmapped):
         failures.append("unmapped locationId should leave Origin WH blank, not create an option")
     unknown = next(s for s in srs if s["status"] == "someUnknownStatus")
-    if "Status" in shipment_to_airtable(unknown):
+    if F_STATUS in shipment_to_airtable(unknown):
         failures.append("unknown status should leave Status blank (DEFAULT_SHIPMENT_STATUS=None)")
 
     print()
