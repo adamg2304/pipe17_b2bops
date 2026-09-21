@@ -59,7 +59,7 @@ NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false")
 # ============================================================================
 # ORDERS SYNC (Pipe17 -> Airtable Orders)  — gated by SYNC_ORDERS
 # ============================================================================
-ORDER_SYNC_STATUSES = ["new"]
+ORDER_SYNC_STATUSES = ["readyForFulfillment"]  # Ops-approved (Draft -> "Mark Ready For Fulfillment")
 ORDER_STATUS_SEED = "No Shipments Found"
 
 O_ORDER_NUMBER = "fldE5XFShmJ2VZOzV"
