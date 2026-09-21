@@ -1,83 +1,75 @@
-"""Offline check that the Orders-sync changes landed correctly.
+"""Offline check for the Track A order transform (Pipe17 order -> Airtable Orders).
 
-No GCP, no creds, no network. Runs order_to_airtable over the real #BE64737059217
-payload and asserts the field-ID mapping, line-item filtering, gate-tag stripping,
-blank contact when no customer, and populated contact when a customer is supplied.
+No network, no creds. Contact (name/email/phone/company) is read from the order's
+shippingAddress (decision 2026-09-20); the top-level customer object is a fallback only.
 
     PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest_orders.py
 """
 import json
-
 import config as c
 from order_transform import order_to_airtable
 
-# Real Pipe17 order (#BE64737059217), trimmed to what the transform reads.
+# Real #BE65076828954 shape: shippingAddress has full contact; customer object lacks
+# email/phone (that's what Pipe17 returned live).
 ORDER = {
-    "extOrderId": "#BE64737059217",
-    "orderId": "6e72e9d2190bfc7f",
-    "extOrderCreatedAt": "2026-09-10T04:54:30.000Z",
-    "createdAt": "2026-09-10T04:54:31.387Z",
-    "totalPrice": 6998.75,
-    "tags": ["Airtable"],
+    "extOrderId": "#BE65076828954", "orderId": "3d45ef58286b38f6",
+    "extOrderCreatedAt": "2026-09-20T16:34:28.000Z", "totalPrice": 436308.2,
+    "tags": ["Airtable"], "status": "readyForFulfillment",
+    "customer": {"firstName": "Adam", "lastName": "Goldstein", "company": "Adam - Test Deal (US)"},
     "shippingAddress": {
-        "company": "Hannah Brooke Design - Terral Hill - Montgomery, TX",
-        "address1": "895 Fish Creek Thoroughfare", "address2": "A",
-        "city": "Montgomery", "stateOrProvince": "TX",
-        "zipCodeOrPostalCode": "77316", "country": "US",
-    },
+        "firstName": "Adam", "lastName": "Goldstein", "company": "Adam - Test Deal (US)",
+        "address1": "1695 Beach Street", "address2": "#204", "city": "San Francisco",
+        "stateOrProvince": "CA", "zipCodeOrPostalCode": "94123", "country": "US",
+        "email": "adam@trysway.co", "phone": "516-205-7781"},
     "lineItems": [
-        {"sku": "11-03-00-50", "quantity": 25, "name": "Daily Chair", "requiresShipping": True},
-        {"sku": "White Glove Delivery", "quantity": 1, "name": "White Glove Delivery",
-         "requiresShipping": False},
-    ],
+        {"sku": "11-01-00-54", "quantity": 200, "requiresShipping": True},
+        {"sku": "White Glove Delivery", "quantity": 1, "requiresShipping": False}],
 }
 
 passed = failed = 0
 def check(label, cond):
     global passed, failed
-    if cond:
-        passed += 1; print(f"  PASS  {label}")
-    else:
-        failed += 1; print(f"  FAIL  {label}")
+    if cond: passed += 1; print(f"  PASS  {label}")
+    else: failed += 1; print(f"  FAIL  {label}")
 
-# ---- 1) no customer yet (pre Track B): contact blank, everything else maps ----
-print("1) order_to_airtable(order, customer=None)")
+print("1) order_to_airtable(order) — contact from shippingAddress")
 r = order_to_airtable(ORDER)
-check("Order Number = #BE64737059217", r.get(c.O_ORDER_NUMBER) == "#BE64737059217")
-check("Order Date from extOrderCreatedAt", r.get(c.O_ORDER_DATE) == "2026-09-10")
-check("Pipe17 Order ID = hex orderId", r.get(c.O_PIPE17_ORDER_ID) == "6e72e9d2190bfc7f")
-check("Deal Value = totalPrice", r.get(c.O_DEAL_VALUE) == 6998.75)
+check("Order Number", r.get(c.O_ORDER_NUMBER) == "#BE65076828954")
+check("Order Date from extOrderCreatedAt", r.get(c.O_ORDER_DATE) == "2026-09-20")
+check("Pipe17 Order ID = hex orderId", r.get(c.O_PIPE17_ORDER_ID) == "3d45ef58286b38f6")
+check("Deal Value = totalPrice", r.get(c.O_DEAL_VALUE) == 436308.2)
 check("Status seeded", r.get(c.O_STATUS) == "No Shipments Found")
-check("Delivery Address", r.get(c.O_DELIVERY_ADDRESS) == "895 Fish Creek Thoroughfare")
-check("Suite Number", r.get(c.O_SUITE_NUMBER) == "A")
+check("Delivery Address", r.get(c.O_DELIVERY_ADDRESS) == "1695 Beach Street")
+check("Suite Number", r.get(c.O_SUITE_NUMBER) == "#204")
 check("City / State / Zip", (r.get(c.O_CITY), r.get(c.O_STATE), r.get(c.O_ZIP_CODE))
-      == ("Montgomery", "TX", "77316"))
+      == ("San Francisco", "CA", "94123"))
 li = json.loads(r.get(c.O_ORDER_LINE_ITEMS))
-check("Line items keep the product SKU", li["SKU"] == ["11-03-00-50"])
-check("Line items keep quantity", li["Quantity"] == [25])
+check("Line items keep the product SKU", li["SKU"] == ["11-01-00-54"])
 check("Line items drop the White Glove service line", "White Glove Delivery" not in li["SKU"])
 check("Product ID empty (no Shopify id in Pipe17)", li["Product ID"] == [])
 check("Gate tag 'Airtable' stripped from Order Tags", c.O_ORDER_TAGS not in r)
-check("Customer Name blank without a customer", c.O_CUSTOMER_NAME not in r)
-check("Customer Email blank without a customer", c.O_CUSTOMER_EMAIL not in r)
-check("Company Name NOT taken from messy shippingAddress.company", c.O_COMPANY_NAME not in r)
-check("Deal Name falls back to order number only", r.get(c.O_DEAL_NAME) == "#BE64737059217")
-
-# ---- 2) with a Pipe17 customer (post Track B): contact fills, no code change ----
-print("2) order_to_airtable(order, customer=<from Track B>)")
-cust = {"firstName": "Hannah", "lastName": "Weinberg", "email": "hannah@example.com",
-        "phone": "555-0100", "company": "Terral Hill"}
-r2 = order_to_airtable(ORDER, cust)
-check("Customer Name", r2.get(c.O_CUSTOMER_NAME) == "Hannah Weinberg")
-check("Customer Email", r2.get(c.O_CUSTOMER_EMAIL) == "hannah@example.com")
-check("Customer Phone", r2.get(c.O_CUSTOMER_PHONE) == "555-0100")
-check("Company from customer (clean)", r2.get(c.O_COMPANY_NAME) == "Terral Hill")
+# contact now lands from shippingAddress (the whole point of the change)
+check("Customer Name from shippingAddress", r.get(c.O_CUSTOMER_NAME) == "Adam Goldstein")
+check("Customer Email from shippingAddress", r.get(c.O_CUSTOMER_EMAIL) == "adam@trysway.co")
+check("Customer Phone from shippingAddress", r.get(c.O_CUSTOMER_PHONE) == "516-205-7781")
+check("Company from shippingAddress", r.get(c.O_COMPANY_NAME) == "Adam - Test Deal (US)")
 check("Deal Name = Order - Company - Name",
-      r2.get(c.O_DEAL_NAME) == "#BE64737059217 - Terral Hill - Hannah Weinberg")
+      r.get(c.O_DEAL_NAME) == "#BE65076828954 - Adam - Test Deal (US) - Adam Goldstein")
 
-# ---- 3) merge key + writable-only sanity ----
+print("2) order with NO shippingAddress contact -> those fields blank, order still maps")
+bare = {"extOrderId": "#BE999", "orderId": "abc", "extOrderCreatedAt": "2026-09-20T00:00:00Z",
+        "totalPrice": 100, "tags": ["Airtable"],
+        "shippingAddress": {"address1": "1 A St", "city": "X", "stateOrProvince": "CA", "zipCodeOrPostalCode": "90001"},
+        "lineItems": [{"sku": "S1", "quantity": 2, "requiresShipping": True}]}
+rb = order_to_airtable(bare)
+check("Order Number still maps", rb.get(c.O_ORDER_NUMBER) == "#BE999")
+check("Customer Name blank when no contact anywhere", c.O_CUSTOMER_NAME not in rb)
+check("Customer Email blank when no contact anywhere", c.O_CUSTOMER_EMAIL not in rb)
+check("Deal Name falls back (order # only, no contact/company)", rb.get(c.O_DEAL_NAME) == "#BE999")
+
 print("3) config sanity")
 check("Order upsert merges on Order Number id", c.ORDER_MERGE_FIELD == "fldE5XFShmJ2VZOzV")
+check("Track A watches readyForFulfillment", c.ORDER_SYNC_STATUSES == ["readyForFulfillment"])
 check("No derived fields written (Order Details/Notes left for later steps)",
       c.O_ORDER_DETAILS not in r and c.O_NOTES not in r)
 
