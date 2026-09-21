@@ -31,7 +31,11 @@ def sync_orders(since, tag):
             skipped += 1
             continue
         cust = p17.get_customer(o.get("customerId"))
-        fields = order_to_airtable(o, cust)
+        ext_order_id = o.get("extOrderId")
+        # Status is create-only: is_new is False if the Orders row already exists,
+        # so we never re-stamp Status on an existing (Ops-managed) order.
+        is_new = at.find_record_id(ORDERS_TABLE, ORDER_NUMBER_FIELD, ext_order_id) is None
+        fields = order_to_airtable(o, cust, is_new=is_new)
         if fields.get(O_ORDER_NUMBER):
             orders.append(fields)
     log.info("Orders: mapped %d (%d skipped: missing '%s' tag)", len(orders), skipped, tag)
