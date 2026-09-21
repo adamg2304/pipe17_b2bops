@@ -4,13 +4,11 @@ Mirrors the target fields of the existing HubSpot/Shopify -> Airtable Orders
 connector, sourced from Pipe17 instead. Writes are keyed by Airtable field IDs
 (see config.py, O_* constants).
 
-CONTACT SOURCE (decision 2026-09-17): customer name/email/phone/company do NOT live
-on the Pipe17 order's shippingAddress (that only carries a concatenated company
-string). The fix lives in Track B (HubSpot -> Pipe17), which creates or looks up the
-Pipe17 customer by email at order creation. Once that lands, the order carries a
-customer and this transform reads contact from it. Until then, pass customer=None and
-contact fields come through blank. Company is taken from the customer, never from the
-messy shippingAddress.company.
+CONTACT SOURCE (decision 2026-09-20): read customer name/email/phone from the order's
+shippingAddress. Track B (HubSpot -> Pipe17) puts the delivery contact on shippingAddress,
+and Pipe17 reliably retains name/email/phone there (unlike the top-level customer object,
+which came back without email/phone). Company comes from shippingAddress.company (the deal
+name). If shippingAddress lacks a field, fall back to the customer object when present.
 
 NOT set here (filled by later steps):
   - Order Details / Order Attachments: the generated order-slip PDF (doc step).
@@ -19,7 +17,7 @@ NOT set here (filled by later steps):
 import json
 
 from config import (
-    ORDER_STATUS_SEED, PIPE17_TAG_FILTER,
+    ORDER_STATUS_SEED,
     O_ORDER_NUMBER, O_ORDER_DATE, O_STATUS, O_CUSTOMER_NAME, O_COMPANY_NAME,
     O_DEAL_NAME, O_DEAL_VALUE, O_DELIVERY_ADDRESS, O_SUITE_NUMBER, O_CITY,
     O_STATE, O_ZIP_CODE, O_CUSTOMER_EMAIL, O_CUSTOMER_PHONE, O_ORDER_TAGS,
@@ -46,25 +44,27 @@ def _order_line_items_json(line_items):
     return json.dumps({"Product ID": [], "Quantity": qtys, "SKU": skus})
 
 
-def _contact(order, customer):
-    """(name, email, phone, company) from the Pipe17 customer when present.
+def _contact(order):
+    """(name, email, phone, company) primarily from the order's shippingAddress,
+    falling back to the top-level customer object if a field is missing there."""
+    addr = order.get("shippingAddress") or {}
+    cust = order.get("customer") or {}
 
-    `customer` is the Pipe17 customer object (fetched by main via order.customerId).
-    Company comes from the customer, NOT from the concatenated shippingAddress.company.
-    """
-    c = customer or {}
-    name = " ".join(x for x in [c.get("firstName"), c.get("lastName")] if x).strip()
-    email = c.get("email") or order.get("email")
-    phone = c.get("phone")
-    company = c.get("company")
+    def pick(key):
+        return addr.get(key) or cust.get(key)
+
+    name = " ".join(x for x in [pick("firstName"), pick("lastName")] if x).strip()
+    email = pick("email")
+    phone = pick("phone")
+    company = pick("company")
     return name or None, email or None, phone or None, company or None
 
 
 def order_to_airtable(order, customer=None):
-    """order = one Pipe17 order (see get-orders payload). customer = its Pipe17
-    customer object, or None until Track B attaches one."""
+    """order = one Pipe17 order (see get-orders payload). `customer` is accepted for
+    backward compatibility but no longer required — contact reads from shippingAddress."""
     addr = order.get("shippingAddress") or {}
-    name, email, phone, company = _contact(order, customer)
+    name, email, phone, company = _contact(order)
     order_no = order.get("extOrderId")
 
     deal_name = " - ".join(x for x in [order_no, company, name] if x)
@@ -82,7 +82,6 @@ def order_to_airtable(order, customer=None):
         O_ZIP_CODE: addr.get("zipCodeOrPostalCode"),
         O_PIPE17_ORDER_ID: order.get("orderId"),
         O_ORDER_LINE_ITEMS: _order_line_items_json(order.get("lineItems")),
-        # contact (blank until Track B populates the Pipe17 customer)
         O_CUSTOMER_NAME: name,
         O_CUSTOMER_EMAIL: email,
         O_CUSTOMER_PHONE: phone,
@@ -90,8 +89,7 @@ def order_to_airtable(order, customer=None):
         O_DEAL_NAME: deal_name or None,
     }
 
-    # Tags: pass through, minus the internal Airtable gate tag. typecast on the
-    # upsert matches existing options and creates any that are new.
+    from config import PIPE17_TAG_FILTER
     tags = [t for t in (order.get("tags") or []) if t and t != PIPE17_TAG_FILTER]
     if tags:
         fields[O_ORDER_TAGS] = tags
