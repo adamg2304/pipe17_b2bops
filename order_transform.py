@@ -60,7 +60,7 @@ def _contact(order):
     return name or None, email or None, phone or None, company or None
 
 
-def order_to_airtable(order, customer=None):
+def order_to_airtable(order, customer=None, is_new=True):
     """order = one Pipe17 order (see get-orders payload). `customer` is accepted for
     backward compatibility but no longer required — contact reads from shippingAddress."""
     addr = order.get("shippingAddress") or {}
@@ -73,7 +73,6 @@ def order_to_airtable(order, customer=None):
     fields = {
         O_ORDER_NUMBER: order_no,
         O_ORDER_DATE: order_date or None,
-        O_STATUS: ORDER_STATUS_SEED,
         O_DEAL_VALUE: order.get("totalPrice"),
         O_DELIVERY_ADDRESS: addr.get("address1"),
         O_SUITE_NUMBER: addr.get("address2"),
@@ -88,6 +87,11 @@ def order_to_airtable(order, customer=None):
         O_COMPANY_NAME: company,
         O_DEAL_NAME: deal_name or None,
     }
+
+    # Status is CREATE-ONLY: seed it on insert, never on update (Ops/automations
+    # own it after creation; writing it every sync would clobber their changes).
+    if is_new:
+        fields[O_STATUS] = ORDER_STATUS_SEED
 
     from config import PIPE17_TAG_FILTER
     tags = [t for t in (order.get("tags") or []) if t and t != PIPE17_TAG_FILTER]
