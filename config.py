@@ -161,6 +161,16 @@ PIPE17_ORDER_PREFIX_MAP = {
 }
 HS_DELIVERY_CONTACT_LABEL = os.environ.get("HS_DELIVERY_CONTACT_LABEL", "End User - Delivery Contact")
 
+# --- Deal write-back on Ops approval ----------------------------------------
+# When Track A first sees an order in readyForFulfillment (Ops clicked "Mark Ready
+# For Fulfillment"), move the HubSpot deal to the Ordered-with-Warehouse stage and
+# record the Pipe17 order number on the deal. Deal id comes from the Pipe17 order's
+# hubspot_deal_id custom field (set by Track B at draft creation).
+HS_ORDERED_STAGE_ID = os.environ.get("HS_ORDERED_STAGE_ID", "5428967")            # "Product Ordered with Warehouse"
+HS_ORDER_DETAILS_PROP = os.environ.get("HS_ORDER_DETAILS_PROP", "order_details")  # deal prop for the Pipe17 order number
+HS_DEAL_ID_CUSTOM_FIELD = os.environ.get("HS_DEAL_ID_CUSTOM_FIELD", "hubspot_deal_id")
+WRITEBACK_DEAL_ON_APPROVAL = os.environ.get("WRITEBACK_DEAL_ON_APPROVAL", "true").lower() == "true"
+
 # --- Document generation (order slip / packing list) -----------------------
 GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "true"
 GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower() == "true"  # on once shipment leg proven
