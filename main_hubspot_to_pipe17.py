@@ -32,6 +32,7 @@ def _arg(name):
 
 def main():
     deal_id_arg = _arg("--deal-id")
+    order_suffix = _arg("--order-suffix") or ""
 
     if deal_id_arg:
         log.info("Mode: %s | single deal %s", "DRY_RUN" if DRY_RUN else "LIVE", deal_id_arg)
@@ -48,7 +49,7 @@ def main():
         deal_id = deal.get("id")
         line_items = hs.get_line_items(deal_id)
         contact = hs.delivery_contact_of(deal_id)
-        body, currency, ext_order_id = build_order(deal, line_items, contact)
+        body, currency, ext_order_id = build_order(deal, line_items, contact, order_suffix)
 
         api_key = CURRENCY_API_KEY_MAP.get(currency)
         if not api_key:

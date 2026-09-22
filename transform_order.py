@@ -30,9 +30,9 @@ def currency_of(deal):
     return ((deal.get("properties") or {}).get(HS_CURRENCY_PROP) or "USD").upper()
 
 
-def ext_order_id_of(deal, currency):
+def ext_order_id_of(deal, currency, suffix=""):
     prefix = PIPE17_ORDER_PREFIX_MAP.get(currency, "")
-    return f"{prefix}{deal.get('id')}"
+    return f"{prefix}{deal.get('id')}{suffix or ''}"
 
 
 def _prop(props, key):
@@ -86,11 +86,16 @@ def _line_items(items):
     return out
 
 
-def build_order(deal, line_items, delivery_contact=None):
-    """Returns (order_body, currency, ext_order_id)."""
+def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
+    """Returns (order_body, currency, ext_order_id).
+
+    order_suffix is appended to the minted extOrderId (default empty). Used for
+    test iterations so a re-run of the same deal gets a fresh order number that
+    doesn't collide with Pipe17's retained (cancelled) shipping-request keys.
+    """
     props = deal.get("properties") or {}
     currency = currency_of(deal)
-    ext_order_id = ext_order_id_of(deal, currency)
+    ext_order_id = ext_order_id_of(deal, currency, order_suffix)
 
     body = {
         "extOrderId": ext_order_id,
