@@ -1,0 +1,80 @@
+name: Deploy Cloud Run Jobs
+
+# Redeploys both Pipe17 Cloud Run Jobs (Track A + Track B) from source.
+#
+# Triggers:
+#   - push to main that touches app code / Dockerfile / this workflow
+#   - manual "Run workflow" button (workflow_dispatch), optionally one job only
+#
+# One-time setup this workflow depends on lives in DEPLOY.md. In short you need
+# two repo secrets (Workload Identity Federation, no long-lived keys):
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  full provider resource name
+#   GCP_DEPLOY_SERVICE_ACCOUNT      deployer SA email
+# The deploy SA needs run.admin, cloudbuild.builds.editor, iam.serviceAccountUser,
+# artifactregistry.writer, storage.admin, and secretmanager access on the 5 secrets.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.py"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "assets/**"
+      - ".github/workflows/deploy-cloud-run.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which job(s) to deploy"
+        type: choice
+        default: both
+        options: [both, track-a, track-b]
+
+env:
+  GCP_PROJECT: pipe17-b2bops
+  GCP_REGION: europe-west1
+
+# One deploy at a time; cancel a superseded run rather than racing two builds.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for Workload Identity Federation
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Track A (pipe17-airtable-sync)
+        if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'track-a' }}
+        run: |
+          gcloud run jobs deploy pipe17-airtable-sync \
+            --source . \
+            --project "$GCP_PROJECT" \
+            --region "$GCP_REGION" \
+            --tasks 1 --max-retries 1 \
+            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest \
+            --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,SYNC_LOOKBACK_MINUTES=35,GENERATE_ORDER_SLIP=true
+
+      - name: Deploy Track B (hubspot-pipe17-orders)
+        if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'track-b' }}
+        run: |
+          gcloud run jobs deploy hubspot-pipe17-orders \
+            --source . \
+            --project "$GCP_PROJECT" \
+            --region "$GCP_REGION" \
+            --tasks 1 --max-retries 1 \
+            --command python --args main_hubspot_to_pipe17.py \
+            --set-secrets=PIPE17_API_KEY_US=pipe17-api-key-us:latest,PIPE17_API_KEY_CA=pipe17-api-key-ca:latest,HUBSPOT_TOKEN=hubspot-token:latest \
+            --set-env-vars=DRY_RUN=false,HS_LOOKBACK_MINUTES=35,HS_DEPOSIT_PAID_STAGE_ID=10492961
