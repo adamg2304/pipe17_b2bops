@@ -15,6 +15,7 @@ from config import (
     ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD, FIELD_LABELS,
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS,
+    GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
 )
 import pipe17_client as p17
 import airtable_client as at
@@ -74,8 +75,29 @@ def _generate_order_slips(records, raw_by_num):
         log.info("Order slips generated + attached: %d", made)
 
 
+def _generate_packing_lists(records, raw_by_num):
+    """Render + attach a packing list to each shipment that doesn't already have one."""
+    made = 0
+    for rec in records:
+        f = rec.get("fields", {})
+        num = f.get(SHIPMENT_NUMBER_FIELD)
+        shipment = raw_by_num.get(num)
+        if not shipment or f.get(SHIP_PACKING_LIST_ATTACH):   # unknown, or list already present
+            continue
+        try:
+            pdf = docs_render.render_pdf(docs_render.packing_list_html(shipment))
+            fname = "PackingList_%s.pdf" % (str(num or "shipment").lstrip("#"))
+            airtable_attach.attach_pdf(rec["id"], SHIP_PACKING_LIST_ATTACH, fname, pdf)
+            made += 1
+        except Exception:
+            log.exception("Packing list failed for %s", num)
+    if made:
+        log.info("Packing lists generated + attached: %d", made)
+
+
 def sync_shipments(since, tag):
     order_link_cache = {}
+    raw_by_num = {}
 
     def resolve_order_link(ext_order_id):
         if not ext_order_id:
@@ -97,6 +119,7 @@ def sync_shipments(since, tag):
         if rec_id:
             fields[SHIPMENT_ORDER_LINK_FIELD] = [rec_id]
         shipments.append(fields)
+        raw_by_num[fields[SHIPMENT_NUMBER_FIELD]] = sr
 
     log.info("Mapped %d tagged shipping requests (%d skipped: missing '%s' tag)",
              len(shipments), skipped, tag)
@@ -113,8 +136,10 @@ def sync_shipments(since, tag):
             log.info("  %s -> Order Link %s | %s", f.get(SHIPMENT_NUMBER_FIELD),
                      f.get(SHIPMENT_ORDER_LINK_FIELD, "(none)"), readable)
     elif shipments:
-        created, updated, _ = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
+        created, updated, records = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
         log.info("Shipments upserted: %d created, %d updated", created, updated)
+        if GENERATE_PACKING_LIST:
+            _generate_packing_lists(records, raw_by_num)
 
 
 def main():
