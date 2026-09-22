@@ -1,6 +1,7 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
-# wkhtmltopdf (headless via xvfb) for order slip / packing list PDFs
+# wkhtmltopdf (headless via xvfb) for order slip / packing list PDFs.
+# Pinned to bookworm: wkhtmltopdf was dropped from Debian trixie's repos.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       wkhtmltopdf xvfb fontconfig fonts-dejavu-core \
  && printf '#!/bin/sh\nexec xvfb-run -a /usr/bin/wkhtmltopdf "$@"\n' > /usr/local/bin/wkhtmltopdf-headless \
