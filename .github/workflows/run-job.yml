@@ -15,6 +15,10 @@ on:
         options:
           - pipe17-airtable-sync
           - hubspot-pipe17-orders
+      args:
+        description: "Optional container args override, comma-separated (e.g. main_hubspot_to_pipe17.py,--deal-id,65076828954). Blank = the job's default."
+        type: string
+        default: ""
       wait:
         description: "Wait for the run to finish (surfaces pass/fail here)"
         type: boolean
@@ -39,8 +43,15 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Execute job
+        env:
+          JOB: ${{ inputs.job }}
+          ARGS: ${{ inputs.args }}
+          WAIT: ${{ inputs.wait }}
         run: |
-          gcloud run jobs execute "${{ inputs.job }}" \
+          EXTRA=()
+          [ -n "$ARGS" ] && EXTRA+=("--args=$ARGS")
+          [ "$WAIT" = "true" ] && EXTRA+=("--wait")
+          gcloud run jobs execute "$JOB" \
             --project "$GCP_PROJECT" \
             --region "$GCP_REGION" \
-            ${{ inputs.wait && '--wait' || '' }}
+            "${EXTRA[@]}"
