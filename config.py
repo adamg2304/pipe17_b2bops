@@ -146,3 +146,9 @@ PIPE17_ORDER_PREFIX_MAP = {
     "CAD": os.environ.get("PIPE17_PREFIX_CA", "#CEN"),
 }
 HS_DELIVERY_CONTACT_LABEL = os.environ.get("HS_DELIVERY_CONTACT_LABEL", "End User - Delivery Contact")
+
+# --- Document generation (order slip / packing list) -----------------------
+GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "true"
+GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower() == "true"  # on once shipment leg proven
+O_ORDER_ATTACHMENTS = "fldo34yjW8UPZKNJ5"        # Orders multipleAttachments — order slip PDF
+SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments — packing list PDF

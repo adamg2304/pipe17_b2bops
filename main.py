@@ -14,18 +14,21 @@ from config import (
     ORDERS_TABLE, SHIPMENTS_TABLE,
     ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD, FIELD_LABELS,
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
+    GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS,
 )
 import pipe17_client as p17
 import airtable_client as at
 from transform import shipment_to_airtable, order_number_of
 from order_transform import order_to_airtable
+import docs_render
+import airtable_attach
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("pipe17-airtable")
 
 
 def sync_orders(since, tag):
-    orders, skipped = [], 0
+    orders, raw_by_num, skipped = [], {}, 0
     for o in p17.iter_orders(since, tag=tag or None, statuses=ORDER_SYNC_STATUSES):
         if tag and tag not in (o.get("tags") or []):
             skipped += 1
@@ -38,14 +41,37 @@ def sync_orders(since, tag):
         fields = order_to_airtable(o, cust, is_new=is_new)
         if fields.get(O_ORDER_NUMBER):
             orders.append(fields)
+            raw_by_num[ext_order_id] = o
     log.info("Orders: mapped %d (%d skipped: missing '%s' tag)", len(orders), skipped, tag)
     if orders and DRY_RUN:
         log.info("DRY_RUN: not writing %d orders. Sample:", len(orders))
         for f in orders[:5]:
             log.info("  %s", f)
     elif orders:
-        created, updated = at.upsert(ORDERS_TABLE, orders, [ORDER_MERGE_FIELD])
+        created, updated, records = at.upsert(ORDERS_TABLE, orders, [ORDER_MERGE_FIELD])
         log.info("Orders upserted: %d created, %d updated", created, updated)
+        if GENERATE_ORDER_SLIP:
+            _generate_order_slips(records, raw_by_num)
+
+
+def _generate_order_slips(records, raw_by_num):
+    """Render + attach an order slip to each order that doesn't already have one."""
+    made = 0
+    for rec in records:
+        f = rec.get("fields", {})
+        num = f.get(O_ORDER_NUMBER)
+        order = raw_by_num.get(num)
+        if not order or f.get(O_ORDER_ATTACHMENTS):   # unknown, or slip already present
+            continue
+        try:
+            pdf = docs_render.render_pdf(docs_render.order_slip_html(order))
+            fname = "OrderSlip_%s.pdf" % (str(num or "order").lstrip("#"))
+            airtable_attach.attach_pdf(rec["id"], O_ORDER_ATTACHMENTS, fname, pdf)
+            made += 1
+        except Exception:
+            log.exception("Order slip failed for %s", num)
+    if made:
+        log.info("Order slips generated + attached: %d", made)
 
 
 def sync_shipments(since, tag):
@@ -87,7 +113,7 @@ def sync_shipments(since, tag):
             log.info("  %s -> Order Link %s | %s", f.get(SHIPMENT_NUMBER_FIELD),
                      f.get(SHIPMENT_ORDER_LINK_FIELD, "(none)"), readable)
     elif shipments:
-        created, updated = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
+        created, updated, _ = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
         log.info("Shipments upserted: %d created, %d updated", created, updated)
 
 

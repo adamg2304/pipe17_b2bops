@@ -19,13 +19,16 @@ def find_record_id(table, field_name, value):
 def upsert(table, records, merge_fields, typecast=True):
     url = f"{BASE}/{table}"
     created = updated = 0
+    out = []
     for i in range(0, len(records), 10):
         batch = records[i:i + 10]
         payload = {"performUpsert": {"fieldsToMergeOn": merge_fields},
-                   "records": [{"fields": f} for f in batch], "typecast": typecast}
+                   "records": [{"fields": f} for f in batch], "typecast": typecast,
+                   "returnFieldsByFieldId": True}
         resp = requests.patch(url, headers=HEADERS, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         created += len(data.get("createdRecords", []))
         updated += len(data.get("updatedRecords", []))
-    return created, updated
+        out.extend(data.get("records", []))
+    return created, updated, out
