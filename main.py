@@ -16,9 +16,12 @@ from config import (
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS,
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
+    WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
+    HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
 )
 import pipe17_client as p17
 import airtable_client as at
+import hubspot_client as hs
 from transform import shipment_to_airtable, order_number_of
 from order_transform import order_to_airtable
 import docs_render
@@ -30,6 +33,7 @@ log = logging.getLogger("pipe17-airtable")
 
 def sync_orders(since, tag):
     orders, raw_by_num, skipped = [], {}, 0
+    new_orders = []
     for o in p17.iter_orders(since, tag=tag or None, statuses=ORDER_SYNC_STATUSES):
         if tag and tag not in (o.get("tags") or []):
             skipped += 1
@@ -43,6 +47,8 @@ def sync_orders(since, tag):
         if fields.get(O_ORDER_NUMBER):
             orders.append(fields)
             raw_by_num[ext_order_id] = o
+            if is_new:   # first time we see this order Ops-approved -> write back to HubSpot
+                new_orders.append(o)
     log.info("Orders: mapped %d (%d skipped: missing '%s' tag)", len(orders), skipped, tag)
     if orders and DRY_RUN:
         log.info("DRY_RUN: not writing %d orders. Sample:", len(orders))
@@ -53,6 +59,8 @@ def sync_orders(since, tag):
         log.info("Orders upserted: %d created, %d updated", created, updated)
         if GENERATE_ORDER_SLIP:
             _generate_order_slips(records, raw_by_num)
+        if WRITEBACK_DEAL_ON_APPROVAL:
+            _writeback_deals(new_orders)
 
 
 def _generate_order_slips(records, raw_by_num):
@@ -73,6 +81,47 @@ def _generate_order_slips(records, raw_by_num):
             log.exception("Order slip failed for %s", num)
     if made:
         log.info("Order slips generated + attached: %d", made)
+
+
+def _hubspot_deal_id(order):
+    """The HubSpot deal id behind a Pipe17 order: the hubspot_deal_id custom field
+    Track B stamps at creation, falling back to stripping the currency prefix off
+    extOrderId (production order numbers are just <prefix><dealId>)."""
+    for cf in order.get("customFields") or []:
+        if cf.get("name") == HS_DEAL_ID_CUSTOM_FIELD and cf.get("value"):
+            return str(cf["value"])
+    ext = order.get("extOrderId") or ""
+    for prefix in PIPE17_ORDER_PREFIX_MAP.values():
+        if prefix and ext.startswith(prefix):
+            rest = ext[len(prefix):]
+            return rest or None
+    return None
+
+
+def _writeback_deals(new_orders):
+    """On Ops approval (order now readyForFulfillment, first sync), move the HubSpot
+    deal to the Ordered-with-Warehouse stage and record the Pipe17 order number.
+    Per-deal errors are caught so a write-back failure never blocks the sync."""
+    if not new_orders:
+        return
+    if not HUBSPOT_TOKEN:
+        log.warning("Deal write-back skipped: HUBSPOT_TOKEN not set on this job.")
+        return
+    done = 0
+    for o in new_orders:
+        deal_id = _hubspot_deal_id(o)
+        if not deal_id:
+            log.warning("Deal write-back skipped for %s: no hubspot_deal_id.", o.get("extOrderId"))
+            continue
+        try:
+            hs.update_deal(deal_id, {"dealstage": HS_ORDERED_STAGE_ID,
+                                     HS_ORDER_DETAILS_PROP: o.get("extOrderId")})
+            done += 1
+        except Exception:
+            log.exception("Deal write-back failed for deal %s (order %s)",
+                          deal_id, o.get("extOrderId"))
+    if done:
+        log.info("HubSpot deals moved to Ordered-with-Warehouse: %d", done)
 
 
 def _generate_packing_lists(records, raw_by_num):

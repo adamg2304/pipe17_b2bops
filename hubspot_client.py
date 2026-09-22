@@ -153,3 +153,8 @@ def delivery_contact_of(deal_id):
 def set_pipe17_order_id(deal_id, pipe17_order_id):
     body = {"properties": {HS_PIPE17_ORDER_ID_PROP: pipe17_order_id}}
     _request("PATCH", f"/crm/v3/objects/deals/{deal_id}", json=body)
+
+
+def update_deal(deal_id, properties):
+    """PATCH arbitrary properties onto a deal (e.g. dealstage + Pipe17 order number)."""
+    _request("PATCH", f"/crm/v3/objects/deals/{deal_id}", json={"properties": properties})
