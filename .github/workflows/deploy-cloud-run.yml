@@ -64,7 +64,7 @@ jobs:
             --project "$GCP_PROJECT" \
             --region "$GCP_REGION" \
             --tasks 1 --max-retries 1 \
-            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest \
+            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest \
             --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,SYNC_LOOKBACK_MINUTES=35,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true
 
       - name: Deploy Track B (hubspot-pipe17-orders)

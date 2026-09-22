@@ -144,11 +144,35 @@ SERVICE_SKUS = {
     "Union Labor Surcharge", "Stair Carry Surcharge", "Expedited Shipping",
     "After Hours Surcharge", "Freight Shipping",
 }
+
+# --- Order-level routing tags (from HubSpot shipping service lines) ----------
+# Surfaced on the Pipe17 order so Ops routing rules can act on them. Tag STRINGS
+# are env-overridable so they can be matched exactly to the Pipe17 order-routing
+# rules once those are built. Logic (per the 2026-09-22 B2B sync call):
+#   white glove line  -> White Glove + LTL (final delivery defaults LTL)
+#   free shipping line -> UPS
+#   otherwise          -> LTL (B2B default)
+SHIP_TAG_WHITE_GLOVE = os.environ.get("SHIP_TAG_WHITE_GLOVE", "White Glove")
+SHIP_TAG_LTL = os.environ.get("SHIP_TAG_LTL", "LTL")
+SHIP_TAG_UPS = os.environ.get("SHIP_TAG_UPS", "UPS")
+WHITE_GLOVE_SKUS = {"White Glove Delivery"}
+FREE_SHIPPING_SKUS = {"Free Shipping"}
+ORDER_ROUTING_TAGS = os.environ.get("ORDER_ROUTING_TAGS", "true").lower() == "true"
 PIPE17_ORDER_PREFIX_MAP = {
     "USD": os.environ.get("PIPE17_PREFIX_US", "#BE"),
     "CAD": os.environ.get("PIPE17_PREFIX_CA", "#CEN"),
 }
 HS_DELIVERY_CONTACT_LABEL = os.environ.get("HS_DELIVERY_CONTACT_LABEL", "End User - Delivery Contact")
+
+# --- Deal write-back on Ops approval ----------------------------------------
+# When Track A first sees an order in readyForFulfillment (Ops clicked "Mark Ready
+# For Fulfillment"), move the HubSpot deal to the Ordered-with-Warehouse stage and
+# record the Pipe17 order number on the deal. Deal id comes from the Pipe17 order's
+# hubspot_deal_id custom field (set by Track B at draft creation).
+HS_ORDERED_STAGE_ID = os.environ.get("HS_ORDERED_STAGE_ID", "5428967")            # "Product Ordered with Warehouse"
+HS_ORDER_DETAILS_PROP = os.environ.get("HS_ORDER_DETAILS_PROP", "order_details")  # deal prop for the Pipe17 order number
+HS_DEAL_ID_CUSTOM_FIELD = os.environ.get("HS_DEAL_ID_CUSTOM_FIELD", "hubspot_deal_id")
+WRITEBACK_DEAL_ON_APPROVAL = os.environ.get("WRITEBACK_DEAL_ON_APPROVAL", "true").lower() == "true"
 
 # --- Cross-system deep links written onto Airtable rows ---------------------
 # Orders get a HubSpot deal link + Pipe17 order link; shipments get a Pipe17
