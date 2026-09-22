@@ -55,6 +55,10 @@ check("Customer Phone from shippingAddress", r.get(c.O_CUSTOMER_PHONE) == "516-2
 check("Company from shippingAddress", r.get(c.O_COMPANY_NAME) == "Adam - Test Deal (US)")
 check("Deal Name = Order - Company - Name",
       r.get(c.O_DEAL_NAME) == "#BE65076828954 - Adam - Test Deal (US) - Adam Goldstein")
+check("HubSpot deal link (deal id from extOrderId)",
+      r.get(c.O_HUBSPOT_DEAL_LINK) == "https://app.hubspot.com/contacts/5361087/record/0-3/65076828954")
+check("Pipe17 order link (search URL, # stripped)",
+      r.get(c.O_PIPE17_ORDER_LINK) == "https://app.pipe17.com/d6490d20e53e3811/orders/orders?search=BE65076828954")
 
 print("2) order with NO shippingAddress contact -> those fields blank, order still maps")
 bare = {"extOrderId": "#BE999", "orderId": "abc", "extOrderCreatedAt": "2026-09-20T00:00:00Z",

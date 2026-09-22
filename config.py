@@ -33,6 +33,7 @@ F_STATE = "fldxyu1jGoYMS1rA5"
 F_CUSTOMER_EMAIL = "fldH76ux37k5Hmhnw"
 F_LINE_ITEMS = "fldrmuH8qsLeBDAtr"
 F_SHIPMENT_CREATION_DATE = "fldAR0iUA9liD09QA"
+F_PIPE17_REQUEST_LINK = "fldEWt9Sq7Q41vydM"   # Pipe17 Shipping Request deep link
 
 FIELD_LABELS = {
     F_SHIPMENT_NUMBER: "Shipment Number", F_ORDER_LINK: "Order Link",
@@ -81,6 +82,8 @@ O_ORDER_DETAILS = "fldCln1sbb4Rx3rGS"
 O_NOTES = "fldzxyuljaUM82P3W"
 O_PIPE17_ORDER_ID = "fldz8upok6ZOlv9Zv"
 O_ORDER_LINE_ITEMS = "fldMKgX11B2IypTzY"
+O_HUBSPOT_DEAL_LINK = "fldpzcSrzXgjXkSYH"   # HubSpot deal deep link
+O_PIPE17_ORDER_LINK = "fldl2GDoFDZZ4C73Z"   # Pipe17 order deep link
 ORDER_MERGE_FIELD = O_ORDER_NUMBER
 
 # ===========================================================================
@@ -170,6 +173,21 @@ HS_ORDERED_STAGE_ID = os.environ.get("HS_ORDERED_STAGE_ID", "5428967")          
 HS_ORDER_DETAILS_PROP = os.environ.get("HS_ORDER_DETAILS_PROP", "order_details")  # deal prop for the Pipe17 order number
 HS_DEAL_ID_CUSTOM_FIELD = os.environ.get("HS_DEAL_ID_CUSTOM_FIELD", "hubspot_deal_id")
 WRITEBACK_DEAL_ON_APPROVAL = os.environ.get("WRITEBACK_DEAL_ON_APPROVAL", "true").lower() == "true"
+
+# --- Cross-system deep links written onto Airtable rows ---------------------
+# Orders get a HubSpot deal link + Pipe17 order link; shipments get a Pipe17
+# shipping-request link, so Ops can jump straight from Airtable to either system.
+# The Pipe17 links use the app's search URL (proven to resolve); the org segment
+# and URL templates are env-overridable so a path tweak needs no code change.
+WRITE_CROSSLINKS = os.environ.get("WRITE_CROSSLINKS", "true").lower() == "true"
+HS_APP_BASE = os.environ.get("HS_APP_BASE", "https://app.hubspot.com")
+HS_PORTAL_ID = os.environ.get("HS_PORTAL_ID", "5361087")
+PIPE17_APP_BASE = os.environ.get("PIPE17_APP_BASE_URL", "https://app.pipe17.com")
+PIPE17_APP_ORG = os.environ.get("PIPE17_APP_ORG", "d6490d20e53e3811")
+PIPE17_ORDER_URL_TMPL = os.environ.get(
+    "PIPE17_ORDER_URL_TMPL", "{base}/{org}/orders/orders?search={num}")
+PIPE17_SHIPMENT_URL_TMPL = os.environ.get(
+    "PIPE17_SHIPMENT_URL_TMPL", "{base}/{org}/orders/shipments?search={num}")
 
 # --- Document generation (order slip / packing list) -----------------------
 GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "true"

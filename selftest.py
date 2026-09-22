@@ -19,7 +19,7 @@ os.environ.setdefault("AIRTABLE_API_KEY", "selftest")
 from transform import shipment_to_airtable, order_number_of  # noqa: E402
 from config import (  # noqa: E402
     NORMALIZE_SHIPMENT_NUMBER,
-    F_SHIPMENT_NUMBER, F_ORIGIN_WH, F_STATUS, F_LINE_ITEMS,
+    F_SHIPMENT_NUMBER, F_ORIGIN_WH, F_STATUS, F_LINE_ITEMS, F_PIPE17_REQUEST_LINK,
 )
 
 
@@ -60,6 +60,9 @@ def main():
             failures.append(f"{sn}: parent parsed as {parent!r}, expected '#TestCA1040'")
         if order_number_of(sr) != "#TestCA1040":
             failures.append(f"{sn}: order link key wrong")
+        want_link = f"https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search={sn.lstrip('#')}"
+        if f.get(F_PIPE17_REQUEST_LINK) != want_link:
+            failures.append(f"{sn}: Pipe17 request link wrong ({f.get(F_PIPE17_REQUEST_LINK)!r})")
 
     unmapped = next(s for s in srs if s["locationId"] == "UNMAPPED_LOC_9999")
     if F_ORIGIN_WH in shipment_to_airtable(unmapped):

@@ -22,7 +22,36 @@ from config import (
     O_DEAL_NAME, O_DEAL_VALUE, O_DELIVERY_ADDRESS, O_SUITE_NUMBER, O_CITY,
     O_STATE, O_ZIP_CODE, O_CUSTOMER_EMAIL, O_CUSTOMER_PHONE, O_ORDER_TAGS,
     O_PIPE17_ORDER_ID, O_ORDER_LINE_ITEMS,
+    O_HUBSPOT_DEAL_LINK, O_PIPE17_ORDER_LINK, WRITE_CROSSLINKS,
+    HS_APP_BASE, HS_PORTAL_ID, PIPE17_APP_BASE, PIPE17_APP_ORG,
+    PIPE17_ORDER_URL_TMPL, PIPE17_ORDER_PREFIX_MAP,
 )
+
+
+def _hubspot_deal_id(order):
+    """Deal id behind a Pipe17 order: the hubspot_deal_id custom field Track B sets,
+    else the digits left after stripping the currency prefix off extOrderId."""
+    for cf in order.get("customFields") or []:
+        if cf.get("name") == "hubspot_deal_id" and cf.get("value"):
+            return str(cf["value"])
+    ext = order.get("extOrderId") or ""
+    for prefix in PIPE17_ORDER_PREFIX_MAP.values():
+        if prefix and ext.startswith(prefix):
+            return ext[len(prefix):] or None
+    return None
+
+
+def _crosslinks(order):
+    """HubSpot deal + Pipe17 order deep links for the Orders row."""
+    links = {}
+    deal_id = _hubspot_deal_id(order)
+    if deal_id:
+        links[O_HUBSPOT_DEAL_LINK] = f"{HS_APP_BASE}/contacts/{HS_PORTAL_ID}/record/0-3/{deal_id}"
+    num = (order.get("extOrderId") or "").lstrip("#")
+    if num:
+        links[O_PIPE17_ORDER_LINK] = PIPE17_ORDER_URL_TMPL.format(
+            base=PIPE17_APP_BASE, org=PIPE17_APP_ORG, num=num)
+    return links
 
 
 def _order_line_items_json(line_items):
@@ -97,5 +126,8 @@ def order_to_airtable(order, customer=None, is_new=True):
     tags = [t for t in (order.get("tags") or []) if t and t != PIPE17_TAG_FILTER]
     if tags:
         fields[O_ORDER_TAGS] = tags
+
+    if WRITE_CROSSLINKS:
+        fields.update(_crosslinks(order))
 
     return {k: v for k, v in fields.items() if v not in (None, "")}
