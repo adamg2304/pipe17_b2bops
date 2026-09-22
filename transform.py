@@ -4,7 +4,8 @@ from config import (
     LOCATION_MAP, STATUS_MAP, DEFAULT_SHIPMENT_STATUS, NORMALIZE_SHIPMENT_NUMBER,
     F_SHIPMENT_NUMBER, F_CUSTOMER_NAME, F_DELIVERY_ADDRESS, F_CITY, F_ZIP_CODE,
     F_CUSTOMER_EMAIL, F_LINE_ITEMS, F_STATE, F_ORIGIN_WH, F_STATUS,
-    F_SHIPMENT_CREATION_DATE,
+    F_SHIPMENT_CREATION_DATE, F_PIPE17_REQUEST_LINK,
+    WRITE_CROSSLINKS, PIPE17_APP_BASE, PIPE17_APP_ORG, PIPE17_SHIPMENT_URL_TMPL,
 )
 
 _SPLIT_SUFFIX = re.compile(r"\.(\d+)$")
@@ -48,6 +49,11 @@ def shipment_to_airtable(sr):
     created = sr.get("createdAt")
     if created:
         fields[F_SHIPMENT_CREATION_DATE] = created[:10]
+    if WRITE_CROSSLINKS:
+        num = (sr.get("extShipmentId") or "").lstrip("#")
+        if num:
+            fields[F_PIPE17_REQUEST_LINK] = PIPE17_SHIPMENT_URL_TMPL.format(
+                base=PIPE17_APP_BASE, org=PIPE17_APP_ORG, num=num)
     return {k: v for k, v in fields.items() if v not in (None, "")}
 
 
