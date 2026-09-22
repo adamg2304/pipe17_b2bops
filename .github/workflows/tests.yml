@@ -1,0 +1,27 @@
+name: Tests
+
+# Runs the offline selftests (no network, no creds) on every push and PR.
+# These are the same checks you'd run locally with dummy creds.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selftests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run offline selftests
+        env:
+          PIPE17_API_KEY: x
+          AIRTABLE_API_KEY: x
+        run: |
+          python selftest.py
+          python selftest_orders.py
+          python selftest_trackb.py

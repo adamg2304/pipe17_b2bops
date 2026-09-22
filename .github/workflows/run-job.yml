@@ -1,0 +1,46 @@
+name: Run Cloud Run Job
+
+# Manually trigger a LIVE run of either sync job from the browser
+# (repo -> Actions -> Run Cloud Run Job -> Run workflow).
+# Needs the same Workload Identity Federation setup as the deploy workflow
+# (the two GCP_* repo secrets). See DEPLOY.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job to run"
+        type: choice
+        default: pipe17-airtable-sync
+        options:
+          - pipe17-airtable-sync
+          - hubspot-pipe17-orders
+      wait:
+        description: "Wait for the run to finish (surfaces pass/fail here)"
+        type: boolean
+        default: true
+
+env:
+  GCP_PROJECT: pipe17-b2bops
+  GCP_REGION: europe-west1
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Execute job
+        run: |
+          gcloud run jobs execute "${{ inputs.job }}" \
+            --project "$GCP_PROJECT" \
+            --region "$GCP_REGION" \
+            ${{ inputs.wait && '--wait' || '' }}
