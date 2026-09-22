@@ -35,6 +35,11 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
 # 2. Deployer service account + the roles a --source deploy needs.
 gcloud iam service-accounts create gh-deployer --project "$PROJECT_ID" \
   --display-name "GitHub Actions Cloud Run deployer" || true
+# Wait for the new account to propagate before binding roles to it, so the
+# first binding doesn't race ahead with a "does not exist" error.
+until gcloud iam service-accounts describe "$SA" --project "$PROJECT_ID" >/dev/null 2>&1; do
+  echo "waiting for $SA to propagate..."; sleep 5
+done
 for ROLE in roles/run.admin roles/cloudbuild.builds.editor \
             roles/artifactregistry.writer roles/storage.admin \
             roles/iam.serviceAccountUser roles/logging.viewer; do
