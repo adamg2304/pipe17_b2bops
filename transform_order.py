@@ -11,6 +11,8 @@ from config import (
     PIPE17_DRAFT_STATUS, PIPE17_AIRTABLE_TAG, PIPE17_ORDER_SOURCE,
     PIPE17_ORDER_PREFIX_MAP, SERVICE_SKUS,
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_TAX_TOTAL_PROP,
+    ORDER_ROUTING_TAGS, SHIP_TAG_WHITE_GLOVE, SHIP_TAG_LTL, SHIP_TAG_UPS,
+    WHITE_GLOVE_SKUS, FREE_SHIPPING_SKUS,
 )
 
 COUNTRY_BY_CURRENCY = {"USD": "US", "CAD": "CA"}
@@ -67,6 +69,24 @@ def _net_unit_price(li):
     return _num(li.get("price"))
 
 
+def shipping_tags(line_items):
+    """Order-level routing tags derived from the deal's shipping service lines.
+
+    White glove -> White Glove + LTL (final delivery defaults LTL). Free shipping
+    -> UPS. Anything else (freight, or no shipping line) -> LTL, the B2B default.
+    Matched on SKU or name so it works whichever field carries the service label.
+    """
+    present = set()
+    for li in line_items or []:
+        present.add((li.get("sku") or "").strip())
+        present.add((li.get("name") or "").strip())
+    if present & WHITE_GLOVE_SKUS:
+        return [SHIP_TAG_WHITE_GLOVE, SHIP_TAG_LTL]
+    if present & FREE_SHIPPING_SKUS:
+        return [SHIP_TAG_UPS]
+    return [SHIP_TAG_LTL]
+
+
 def _line_items(items):
     out = []
     for idx, li in enumerate(items or [], start=1):
@@ -97,12 +117,18 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
     currency = currency_of(deal)
     ext_order_id = ext_order_id_of(deal, currency, order_suffix)
 
+    tags = [PIPE17_AIRTABLE_TAG]
+    if ORDER_ROUTING_TAGS:
+        for t in shipping_tags(line_items):
+            if t not in tags:
+                tags.append(t)
+
     body = {
         "extOrderId": ext_order_id,
         "status": PIPE17_DRAFT_STATUS,
         "currency": currency,
         "extOrderCreatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "tags": [PIPE17_AIRTABLE_TAG],
+        "tags": tags,
         "shippingAddress": _ship_to(props, currency, delivery_contact),
         "lineItems": _line_items(line_items),
         "customFields": [{"name": "hubspot_deal_id", "value": str(deal.get("id"))}],

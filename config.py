@@ -141,6 +141,20 @@ SERVICE_SKUS = {
     "Union Labor Surcharge", "Stair Carry Surcharge", "Expedited Shipping",
     "After Hours Surcharge", "Freight Shipping",
 }
+
+# --- Order-level routing tags (from HubSpot shipping service lines) ----------
+# Surfaced on the Pipe17 order so Ops routing rules can act on them. Tag STRINGS
+# are env-overridable so they can be matched exactly to the Pipe17 order-routing
+# rules once those are built. Logic (per the 2026-09-22 B2B sync call):
+#   white glove line  -> White Glove + LTL (final delivery defaults LTL)
+#   free shipping line -> UPS
+#   otherwise          -> LTL (B2B default)
+SHIP_TAG_WHITE_GLOVE = os.environ.get("SHIP_TAG_WHITE_GLOVE", "White Glove")
+SHIP_TAG_LTL = os.environ.get("SHIP_TAG_LTL", "LTL")
+SHIP_TAG_UPS = os.environ.get("SHIP_TAG_UPS", "UPS")
+WHITE_GLOVE_SKUS = {"White Glove Delivery"}
+FREE_SHIPPING_SKUS = {"Free Shipping"}
+ORDER_ROUTING_TAGS = os.environ.get("ORDER_ROUTING_TAGS", "true").lower() == "true"
 PIPE17_ORDER_PREFIX_MAP = {
     "USD": os.environ.get("PIPE17_PREFIX_US", "#BE"),
     "CAD": os.environ.get("PIPE17_PREFIX_CA", "#CEN"),
