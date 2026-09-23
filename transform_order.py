@@ -11,8 +11,7 @@ from config import (
     PIPE17_DRAFT_STATUS, PIPE17_AIRTABLE_TAG, PIPE17_ORDER_SOURCE,
     PIPE17_ORDER_PREFIX_MAP, SERVICE_SKUS,
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_TAX_TOTAL_PROP,
-    ORDER_ROUTING_TAGS, SHIP_TAG_WHITE_GLOVE, SHIP_TAG_LTL, SHIP_TAG_UPS,
-    WHITE_GLOVE_SKUS, FREE_SHIPPING_SKUS,
+    ORDER_ROUTING_TAGS, ORDER_B2B_TAG, SHIPPING_TAG_MAP,
 )
 
 COUNTRY_BY_CURRENCY = {"USD": "US", "CAD": "CA"}
@@ -70,21 +69,21 @@ def _net_unit_price(li):
 
 
 def shipping_tags(line_items):
-    """Order-level routing tags derived from the deal's shipping service lines.
-
-    White glove -> White Glove + LTL (final delivery defaults LTL). Free shipping
-    -> UPS. Anything else (freight, or no shipping line) -> LTL, the B2B default.
-    Matched on SKU or name so it works whichever field carries the service label.
-    """
+    """Order-level routing tags from the deal's shipping service lines: each named
+    shipping line (White Glove, Free Shipping, Expedited Shipping) adds a same-named
+    tag, and every order also gets the B2B tag. Matched on SKU or name so it works
+    whichever field carries the service label."""
     present = set()
     for li in line_items or []:
         present.add((li.get("sku") or "").strip())
         present.add((li.get("name") or "").strip())
-    if present & WHITE_GLOVE_SKUS:
-        return [SHIP_TAG_WHITE_GLOVE, SHIP_TAG_LTL]
-    if present & FREE_SHIPPING_SKUS:
-        return [SHIP_TAG_UPS]
-    return [SHIP_TAG_LTL]
+    tags = []
+    for key, tag in SHIPPING_TAG_MAP.items():
+        if key in present and tag not in tags:
+            tags.append(tag)
+    if ORDER_B2B_TAG and ORDER_B2B_TAG not in tags:
+        tags.append(ORDER_B2B_TAG)
+    return tags
 
 
 def _line_items(items):

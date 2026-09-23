@@ -32,7 +32,7 @@ body, currency, ext = build_order(DEAL_USD, LINE_ITEMS, CONTACT)
 check("currency USD", currency == "USD")
 check("extOrderId = #BE<dealId>", ext == "#BE64737059217")
 check("status draft", body["status"] == "draft")
-check("tags: Airtable + white-glove routing", body["tags"] == ["Airtable", "White Glove", "LTL"])
+check("tags: Airtable + White Glove + B2B", body["tags"] == ["Airtable", "White Glove", "B2B"])
 check("hubspot_deal_id custom field",
       body["customFields"] == [{"name": "hubspot_deal_id", "value": "64737059217"}])
 
@@ -53,14 +53,18 @@ check("shippingAddress company = dealname", body["shippingAddress"]["company"] =
 check("shippingAddress country inferred US", body["shippingAddress"]["country"] == "US")
 check("shippingAddress contact email", body["shippingAddress"]["email"] == "h@x.com")
 
-print("1b) routing tags by shipping line")
+print("1b) routing tags by shipping line (each named line -> same-name tag; B2B on all)")
+CHAIR = {"sku": "11-03-00-50", "name": "Daily Chair", "quantity": 1, "price": 250, "amount": 250}
 free_body, _, _ = build_order(
-    DEAL_USD, [{"sku": "11-03-00-50", "name": "Daily Chair", "quantity": 1, "price": 250, "amount": 250},
-               {"sku": "Free Shipping", "name": "Free Shipping", "quantity": 1, "price": 0, "amount": 0}], None)
-check("free shipping -> Airtable + UPS", free_body["tags"] == ["Airtable", "UPS"])
-default_body, _, _ = build_order(
-    DEAL_USD, [{"sku": "11-03-00-50", "name": "Daily Chair", "quantity": 1, "price": 250, "amount": 250}], None)
-check("no shipping line -> Airtable + LTL default", default_body["tags"] == ["Airtable", "LTL"])
+    DEAL_USD, [CHAIR, {"sku": "Free Shipping", "name": "Free Shipping", "quantity": 1, "price": 0, "amount": 0}], None)
+check("free shipping -> Airtable + Free Shipping + B2B",
+      free_body["tags"] == ["Airtable", "Free Shipping", "B2B"])
+exp_body, _, _ = build_order(
+    DEAL_USD, [CHAIR, {"sku": "Expedited Shipping", "name": "Expedited Shipping", "quantity": 1, "price": 0, "amount": 0}], None)
+check("expedited -> Airtable + Expedited Shipping + B2B",
+      exp_body["tags"] == ["Airtable", "Expedited Shipping", "B2B"])
+default_body, _, _ = build_order(DEAL_USD, [CHAIR], None)
+check("no shipping line -> Airtable + B2B", default_body["tags"] == ["Airtable", "B2B"])
 
 print("2) CAD deal -> #CEN prefix + CA routing")
 deal_ca = {"id": "63327307681", "properties": {"deal_currency_code": "CAD", "dealname": "Maple Co"}}
