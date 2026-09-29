@@ -16,6 +16,27 @@ def find_record_id(table, field_name, value):
     return recs[0]["id"] if recs else None
 
 
+def find_record(table, field_name, value):
+    """Return the full record (fields keyed by field ID) where field_name==value, or None."""
+    url = f"{BASE}/{table}"
+    formula = '{%s}="%s"' % (field_name, value)
+    resp = requests.get(url, headers=HEADERS,
+                        params={"filterByFormula": formula, "maxRecords": 1,
+                                "returnFieldsByFieldId": "true"}, timeout=30)
+    resp.raise_for_status()
+    recs = resp.json().get("records", [])
+    return recs[0] if recs else None
+
+
+def update_record(table, record_id, fields):
+    """PATCH fields (keyed by field ID) onto one record — e.g. clear an attachment."""
+    url = f"{BASE}/{table}/{record_id}"
+    resp = requests.patch(url, headers=HEADERS,
+                          json={"fields": fields, "typecast": True}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def upsert(table, records, merge_fields, typecast=True):
     url = f"{BASE}/{table}"
     created = updated = 0

@@ -71,6 +71,18 @@ def main():
     if F_STATUS in shipment_to_airtable(unknown):
         failures.append("unknown status should leave Status blank (DEFAULT_SHIPMENT_STATUS=None)")
 
+    # BLK-2: shipment status mapping (PROVISIONAL per 9/25 mtg; confirm via BLK-6 live test)
+    def _status_of(status):
+        return shipment_to_airtable(
+            {"extShipmentId": "#BLK2.1", "status": status, "lineItems": [],
+             "shippingAddress": {}}).get(F_STATUS)
+    if _status_of("readyForFulfillment") != "Out of Stock":
+        failures.append("readyForFulfillment should map to 'Out of Stock'")
+    if _status_of("sentToFulfillment") != "Processing":
+        failures.append("sentToFulfillment should map to 'Processing'")
+    if _status_of("whoKnows") is not None:
+        failures.append("unknown status should leave Status unset")
+
     print()
     if failures:
         print("FAIL:")

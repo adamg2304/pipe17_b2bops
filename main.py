@@ -18,6 +18,7 @@ from config import (
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
     WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
+    PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS,
 )
 import pipe17_client as p17
 import airtable_client as at
@@ -124,16 +125,34 @@ def _writeback_deals(new_orders):
         log.info("HubSpot deals moved to Ordered-with-Warehouse: %d", done)
 
 
-def _generate_packing_lists(records, raw_by_num):
-    """Render + attach a packing list to each shipment that doesn't already have one."""
+def _generate_packing_lists(records, raw_by_num, prior_line_items):
+    """Attach a packing list to each shipment that is SENT to fulfillment (BLK-1/3):
+    a shipment must be handed to the warehouse before its pick list is real, so a
+    shipment still in ready-for-fulfillment gets a row + status but no list yet.
+
+    (Re)generation rule (BLK-4): generate when there is no list yet, or when the
+    shipment's Line Items changed under the same Shipment Number (a re-split/re-route
+    after the first sweep) — in that case the stale list is cleared then replaced,
+    so Airtable never drifts from what Pipe17 will actually ship. Unchanged shipments
+    that already have a list are skipped (idempotent). Errors are caught per-record
+    and never block the sync.
+    """
     made = 0
     for rec in records:
         f = rec.get("fields", {})
         num = f.get(SHIPMENT_NUMBER_FIELD)
         shipment = raw_by_num.get(num)
-        if not shipment or f.get(SHIP_PACKING_LIST_ATTACH):   # unknown, or list already present
+        if not shipment:
             continue
+        if shipment.get("status") not in PACKING_LIST_STATUSES:
+            continue   # not warehouse-bound yet -> no pick list
+        has_pl = bool(f.get(SHIP_PACKING_LIST_ATTACH))
+        changed = num in prior_line_items and prior_line_items[num] != f.get(F_LINE_ITEMS)
+        if has_pl and not changed:
+            continue   # already generated, contents unchanged
         try:
+            if has_pl and changed:   # clear the stale list before replacing it
+                at.update_record(SHIPMENTS_TABLE, rec["id"], {SHIP_PACKING_LIST_ATTACH: []})
             pdf = docs_render.render_pdf(docs_render.packing_list_html(shipment))
             fname = "PackingList_%s.pdf" % (str(num or "shipment").lstrip("#"))
             airtable_attach.attach_pdf(rec["id"], SHIP_PACKING_LIST_ATTACH, fname, pdf)
@@ -185,10 +204,19 @@ def sync_shipments(since, tag):
             log.info("  %s -> Order Link %s | %s", f.get(SHIPMENT_NUMBER_FIELD),
                      f.get(SHIPMENT_ORDER_LINK_FIELD, "(none)"), readable)
     elif shipments:
+        # BLK-4: capture each row's stored Line Items BEFORE the upsert overwrites them,
+        # so the packing-list step can tell when a shipment re-split/re-routed and its
+        # contents changed under the same Shipment Number.
+        prior_line_items = {}
+        if GENERATE_PACKING_LIST:
+            for num in raw_by_num:
+                existing = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, num)
+                if existing:
+                    prior_line_items[num] = (existing.get("fields") or {}).get(F_LINE_ITEMS)
         created, updated, records = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
         log.info("Shipments upserted: %d created, %d updated", created, updated)
         if GENERATE_PACKING_LIST:
-            _generate_packing_lists(records, raw_by_num)
+            _generate_packing_lists(records, raw_by_num, prior_line_items)
 
 
 def main():
