@@ -139,6 +139,12 @@ PIPE17_API_KEY_CA = os.environ.get("PIPE17_API_KEY_CA", os.environ.get("PIPE17_A
 CURRENCY_API_KEY_MAP = {"USD": PIPE17_API_KEY_US, "CAD": PIPE17_API_KEY_CA}
 PIPE17_ORDER_SOURCE = os.environ.get("PIPE17_ORDER_SOURCE", "hubspot")
 
+# Channel integrationId per currency — used to read the per-channel Channel SKU alias
+# (published[].sku) when translating HubSpot base SKUs to Pipe17 product SKUs.
+PIPE17_INTEGRATION_US = os.environ.get("PIPE17_INTEGRATION_US", "a64e620e190eb6aa")  # B2B Orders USA
+PIPE17_INTEGRATION_CA = os.environ.get("PIPE17_INTEGRATION_CA", "34a21b0e3a4c8cdc")  # B2B-CAN Orders
+CURRENCY_CHANNEL_INTEGRATION = {"USD": PIPE17_INTEGRATION_US, "CAD": PIPE17_INTEGRATION_CA}
+
 SERVICE_SKUS = {
     "White Glove Delivery", "Free Shipping",
     "Union Labor Surcharge", "Stair Carry Surcharge", "Expedited Shipping",
