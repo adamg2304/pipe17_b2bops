@@ -21,7 +21,9 @@ jobs:
         env:
           PIPE17_API_KEY: x
           AIRTABLE_API_KEY: x
+          HUBSPOT_TOKEN: x
         run: |
           python selftest.py
           python selftest_orders.py
           python selftest_trackb.py
+          python selftest_inventory.py

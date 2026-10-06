@@ -28,7 +28,7 @@ on:
         description: "Which job(s) to deploy"
         type: choice
         default: both
-        options: [both, track-a, track-b]
+        options: [both, track-a, track-b, inventory]
 
 env:
   GCP_PROJECT: pipe17-b2bops
@@ -78,3 +78,15 @@ jobs:
             --command python --args main_hubspot_to_pipe17.py \
             --set-secrets=PIPE17_API_KEY_US=pipe17-api-key-us:latest,PIPE17_API_KEY_CA=pipe17-api-key-ca:latest,HUBSPOT_TOKEN=hubspot-token:latest \
             --set-env-vars=DRY_RUN=false,HS_LOOKBACK_MINUTES=35,HS_DEPOSIT_PAID_STAGE_ID=10492961
+
+      - name: Deploy Inventory (pipe17-hubspot-inventory)
+        if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'inventory' }}
+        run: |
+          gcloud run jobs deploy pipe17-hubspot-inventory \
+            --source . \
+            --project "$GCP_PROJECT" \
+            --region "$GCP_REGION" \
+            --tasks 1 --max-retries 1 \
+            --command python --args main_inventory_sync.py \
+            --set-secrets=PIPE17_API_KEY_US=pipe17-api-key-us:latest,PIPE17_API_KEY_CA=pipe17-api-key-ca:latest,HUBSPOT_TOKEN=hubspot-token:latest \
+            --set-env-vars=DRY_RUN=true
