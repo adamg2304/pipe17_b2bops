@@ -6,6 +6,7 @@ orderTax = frozen tax from the deal (deferred — Shopify tax via Alex — so 0/
 extOrderId = <currency prefix><deal id>. No channelId — the API key selects US/CA channel.
 """
 import datetime as dt
+import logging
 
 from config import (
     PIPE17_DRAFT_STATUS, PIPE17_AIRTABLE_TAG, PIPE17_ORDER_SOURCE,
@@ -13,6 +14,9 @@ from config import (
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_TAX_TOTAL_PROP,
     ORDER_ROUTING_TAGS, ORDER_B2B_TAG, SHIPPING_TAG_MAP,
 )
+from pipe17_catalog import get_resolver
+
+log = logging.getLogger("hubspot-pipe17")
 
 COUNTRY_BY_CURRENCY = {"USD": "US", "CAD": "CA"}
 
@@ -86,17 +90,21 @@ def shipping_tags(line_items):
     return tags
 
 
-def _line_items(items):
+def _line_items(items, resolver):
     out = []
     for idx, li in enumerate(items or [], start=1):
         qty = _num(li.get("quantity"))
-        sku = li.get("sku") or ""
+        base_sku = li.get("sku") or ""
+        resolved_sku, status = resolver.resolve(base_sku)
+        if status == "unresolved" and base_sku and base_sku not in SERVICE_SKUS:
+            log.warning("SKU %s has no Pipe17 product match on %s channel — sending as-is",
+                        base_sku, resolver.currency)
         entry = {
-            "sku": sku,
+            "sku": resolved_sku,
             "quantity": qty if qty is not None else 1,
-            "name": li.get("name") or sku,
+            "name": li.get("name") or base_sku,
             "uniqueId": f"line-{idx}",
-            "requiresShipping": sku not in SERVICE_SKUS,
+            "requiresShipping": base_sku not in SERVICE_SKUS,
         }
         net = _net_unit_price(li)
         if net is not None:
@@ -116,6 +124,10 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
     currency = currency_of(deal)
     ext_order_id = ext_order_id_of(deal, currency, order_suffix)
 
+    # Translate each HubSpot base SKU to the Pipe17 product SKU for this channel
+    # (built once per currency per process; see pipe17_catalog).
+    resolver = get_resolver(currency)
+
     tags = [PIPE17_AIRTABLE_TAG]
     if ORDER_ROUTING_TAGS:
         for t in shipping_tags(line_items):
@@ -129,9 +141,13 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
         "extOrderCreatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tags": tags,
         "shippingAddress": _ship_to(props, currency, delivery_contact),
-        "lineItems": _line_items(line_items),
+        "lineItems": _line_items(line_items, resolver),
         "customFields": [{"name": "hubspot_deal_id", "value": str(deal.get("id"))}],
     }
+
+    if resolver.collisions:
+        log.warning("Channel SKU alias collisions on %s channel (alias set on >1 product): %s",
+                    currency, {a: sorted(s) for a, s in resolver.collisions.items()})
 
     # Customer (the order's CRM customer, searchable by name/email in Pipe17) — from the
     # deal's delivery contact. Separate from shippingAddress; Pipe17 finds/creates it.

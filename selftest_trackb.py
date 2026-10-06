@@ -7,7 +7,14 @@ built from the delivery contact, and CAD prefix routing.
 
     PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest_trackb.py
 """
+import transform_order
 from transform_order import build_order
+
+# Keep this test offline: stub the SKU resolver so build_order never fetches the Pipe17
+# catalog. The fake passes every SKU through unchanged (status "exact").
+transform_order.get_resolver = lambda currency: type(
+    "R", (), {"resolve": staticmethod(lambda s: (s, "exact")),
+              "collisions": {}, "currency": (currency or "USD").upper()})()
 
 DEAL_USD = {
     "id": "64737059217",
