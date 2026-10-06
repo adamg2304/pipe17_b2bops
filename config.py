@@ -226,3 +226,30 @@ GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "
 GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower() == "true"  # on once shipment leg proven
 O_ORDER_ATTACHMENTS = "fldo34yjW8UPZKNJ5"        # Orders multipleAttachments — order slip PDF
 SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments — packing list PDF
+
+# ===========================================================================
+# Inventory sync  (Pipe17 Available -> HubSpot product properties)
+# ===========================================================================
+# Read-only from Pipe17 (Available per SKU per location), writes only HubSpot
+# product-library number properties. Separate Cloud Run Job; touches no deals,
+# orders, or the order/shipment sync.
+PIPE17_INVENTORY_PATH = os.environ.get("PIPE17_INVENTORY_PATH", "/inventory")
+PIPE17_LOCATIONS_PATH = os.environ.get("PIPE17_LOCATIONS_PATH", "/locations")
+# The country buckets we surface to Sales. Every Pipe17 location is classified by
+# its address.country, read live from /locations, so a new warehouse needs no
+# code change. Availability sums across a base SKU's whole version family (bare +
+# -V variants); the split is purely by warehouse country. inventory_total =
+# inventory_us + inventory_ca (MX/BR excluded).
+INVENTORY_COUNTRIES = ("US", "CA")
+# One key reads org-wide inventory + locations (inventory is tenant-wide, not
+# channel-scoped).
+PIPE17_INVENTORY_READ_KEY = (os.environ.get("PIPE17_INVENTORY_READ_KEY")
+                             or PIPE17_API_KEY_US or PIPE17_API_KEY)
+
+# HubSpot product object + properties written back. inventory_us / inventory_ca /
+# inventory_total are all number properties.
+HS_PRODUCT_OBJECT = os.environ.get("HS_PRODUCT_OBJECT", "products")
+HS_PRODUCT_SKU_PROP = os.environ.get("HS_PRODUCT_SKU_PROP", "hs_sku")
+HS_INVENTORY_US_PROP = os.environ.get("HS_INVENTORY_US_PROP", "inventory_us")
+HS_INVENTORY_CA_PROP = os.environ.get("HS_INVENTORY_CA_PROP", "inventory_ca")
+HS_INVENTORY_TOTAL_PROP = os.environ.get("HS_INVENTORY_TOTAL_PROP", "inventory_total")

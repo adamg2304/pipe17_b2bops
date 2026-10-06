@@ -1,13 +1,13 @@
 # Auto-deploy from GitHub (Cloud Run Jobs)
 
-Pushing to `main` now redeploys both Cloud Run Jobs automatically via
+Pushing to `main` now redeploys all three Cloud Run Jobs automatically via
 `.github/workflows/deploy-cloud-run.yml`. No more manual `gcloud` from Cloud Shell.
 
-- Track A `pipe17-airtable-sync` and Track B `hubspot-pipe17-orders` both redeploy
-  on any push to `main` that touches `*.py`, `Dockerfile`, `requirements.txt`,
-  `assets/**`, or the workflow itself.
+- Track A `pipe17-airtable-sync`, Track B `hubspot-pipe17-orders`, and the inventory
+  sync `pipe17-hubspot-inventory` all redeploy on any push to `main` that touches
+  `*.py`, `Dockerfile`, `requirements.txt`, `assets/**`, or the workflow itself.
 - You can also deploy on demand: repo → **Actions** → **Deploy Cloud Run Jobs** →
-  **Run workflow**, and pick `both`, `track-a`, or `track-b`.
+  **Run workflow**, and pick `both`, `track-a`, `track-b`, or `inventory`.
 - The env vars and `--set-secrets` in the workflow ARE the canonical job config
   (from the handoff §7). Each deploy replaces the job's env/secrets with exactly
   those values, so change config by editing the workflow, not the job in the console
@@ -82,6 +82,52 @@ secret**, add both values printed by step 6:
 - `GCP_DEPLOY_SERVICE_ACCOUNT`
 
 That's it. The next push to `main` (or a manual **Run workflow**) deploys.
+
+## Inventory sync job (pipe17-hubspot-inventory)
+
+Pushes current Pipe17 **Available** into the HubSpot product library
+(`inventory_us` / `inventory_ca` / `inventory_total`) so Sales/Loncom see live
+stock when quoting. Read-only from Pipe17; writes only HubSpot product properties.
+Touches no deals, orders, or the order/shipment sync.
+
+- **First deploy ships `DRY_RUN=true`** (set in the workflow). It logs the computed
+  per-product US/CA/total and writes nothing. Confirm the numbers in the logs, then
+  flip to live by changing `--set-env-vars=DRY_RUN=true` → `DRY_RUN=false` for the
+  inventory step in `deploy-cloud-run.yml` and pushing.
+- Spot-check one SKU without scanning the whole catalog: **Actions → Run Cloud Run
+  Job → `pipe17-hubspot-inventory`**, args `main_inventory_sync.py,--sku,11-01-00-40`.
+- Region split: each Pipe17 location is classified US/CA by its `address.country`
+  (read live from `/locations`), so new warehouses need no code change. A base SKU's
+  availability sums across its whole version family (bare base + every `-V` variant),
+  bucketed purely by warehouse country — so stock on any version counts. The channel
+  Channel-SKU alias is NOT used here (it only governs which version an order draws).
+  `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
+
+### Scheduler (every 20 min)
+
+The two existing jobs are driven by Cloud Scheduler entries that call the Cloud Run
+Jobs run API with an OIDC token from the invoker SA. Add one for the inventory job
+the same way (run once; reuse the invoker SA the other two schedulers already use):
+
+```bash
+PROJECT_ID=pipe17-b2bops
+REGION=europe-west1
+PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+INVOKER_SA=$(gcloud scheduler jobs describe pipe17-airtable-sync-schedule \
+  --location "$REGION" --project "$PROJECT_ID" \
+  --format='value(httpTarget.oidcToken.serviceAccountEmail)')   # same SA as Track A/B
+
+gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
+  --project "$PROJECT_ID" --location "$REGION" \
+  --schedule="*/20 * * * *" --time-zone="Etc/UTC" \
+  --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_NUM/jobs/pipe17-hubspot-inventory:run" \
+  --http-method=POST \
+  --oauth-service-account-email="$INVOKER_SA" \
+  --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+```
+
+(If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
+the same invoker SA and a `*/20 * * * *` cadence.)
 
 ## Verifying / troubleshooting
 
