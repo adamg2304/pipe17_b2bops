@@ -56,3 +56,14 @@ jobs:
             --project "$GCP_PROJECT" \
             --region "$GCP_REGION" \
             "${EXTRA[@]}"
+
+      - name: Dump recent Cloud Run job logs
+        if: always()
+        env:
+          JOB: ${{ inputs.job }}
+        run: |
+          echo "=== recent logs for $JOB (last 10m) ==="
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\"" \
+            --project "$GCP_PROJECT" --limit 150 --freshness=10m \
+            --format='value(timestamp,textPayload)' --order=asc || true
