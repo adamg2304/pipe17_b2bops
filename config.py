@@ -237,11 +237,12 @@ PIPE17_INVENTORY_PATH = os.environ.get("PIPE17_INVENTORY_PATH", "/inventory")
 PIPE17_LOCATIONS_PATH = os.environ.get("PIPE17_LOCATIONS_PATH", "/locations")
 # The country buckets we surface to Sales. Every Pipe17 location is classified by
 # its address.country, read live from /locations, so a new warehouse needs no
-# code change. inventory_total = inventory_us + inventory_ca (MX/BR excluded).
+# code change. Availability sums across a base SKU's whole version family (bare +
+# -V variants); the split is purely by warehouse country. inventory_total =
+# inventory_us + inventory_ca (MX/BR excluded).
 INVENTORY_COUNTRIES = ("US", "CA")
 # One key reads org-wide inventory + locations (inventory is tenant-wide, not
-# channel-scoped). The per-channel catalog aliases are read by pipe17_catalog
-# with each currency's own key.
+# channel-scoped).
 PIPE17_INVENTORY_READ_KEY = (os.environ.get("PIPE17_INVENTORY_READ_KEY")
                              or PIPE17_API_KEY_US or PIPE17_API_KEY)
 

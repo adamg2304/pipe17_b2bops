@@ -97,10 +97,11 @@ Touches no deals, orders, or the order/shipment sync.
 - Spot-check one SKU without scanning the whole catalog: **Actions → Run Cloud Run
   Job → `pipe17-hubspot-inventory`**, args `main_inventory_sync.py,--sku,11-01-00-40`.
 - Region split: each Pipe17 location is classified US/CA by its `address.country`
-  (read live from `/locations`), so new warehouses need no code change. The US number
-  reads the US-channel-aliased product at US locations; the CA number reads the
-  CA-channel-aliased product at CA locations (per-channel versioning, confirmed with
-  Adam). `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
+  (read live from `/locations`), so new warehouses need no code change. A base SKU's
+  availability sums across its whole version family (bare base + every `-V` variant),
+  bucketed purely by warehouse country — so stock on any version counts. The channel
+  Channel-SKU alias is NOT used here (it only governs which version an order draws).
+  `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
 
 ### Scheduler (every 20 min)
 

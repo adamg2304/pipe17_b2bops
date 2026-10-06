@@ -1,15 +1,21 @@
 """Read Pipe17 availability and aggregate it to US / CA per base SKU.
 
 Read-only. Pipe17 tracks inventory per SKU per location; the `available` field
-already nets out committed, so we read it directly (no recompute). Locations are
-classified US/CA by their address.country (read live from /locations), so a new
-warehouse needs no code change.
+already nets out committed, so we read it directly (no recompute).
 
-Per-channel version mapping (decided with Adam): the US number reads the product
-the US channel aliases the base SKU to, at US locations; the CA number reads the
-CA-aliased product at CA locations. A base SKU with no versioning resolves to
-itself on both channels. See pipe17_catalog for the alias resolution.
+A base SKU (e.g. 11-01-00-50) can exist in Pipe17 as several products that share
+the stem: the bare base plus versioned variants (11-01-00-50-V5, -V6, ...). All of
+them hold sellable stock, so availability sums across the whole family. Locations
+are classified US/CA by their address.country (read live from /locations), so the
+split is purely by warehouse and a new warehouse needs no code change. The
+per-channel Channel SKU alias is NOT used here — that only governs which version an
+order draws, not how much stock exists.
+
+  inventory_us    = sum(available) over every stem-matching SKU at US locations
+  inventory_ca    = sum(available) over every stem-matching SKU at CA locations
+  inventory_total = inventory_us + inventory_ca            (MX/BR excluded)
 """
+import re
 import time
 import requests
 
@@ -19,6 +25,14 @@ from config import (
 )
 
 _PAGE = 500
+_VERSION_RE = re.compile(r"-V\d+$")
+
+
+def base_stem(sku):
+    """Strip a trailing -V<n> version suffix: 11-01-00-50-V6 -> 11-01-00-50.
+    A SKU with no version suffix (bare base, or a non-versioned product) is
+    returned unchanged."""
+    return _VERSION_RE.sub("", sku) if sku else sku
 
 
 def _get(path, api_key, params=None, max_retries=4):
@@ -72,47 +86,51 @@ def _as_int(value):
             return 0
 
 
-def inventory_index(api_key):
-    """{sku: {locationId: available}} for the whole catalog, one paginated scan.
-    `available` already accounts for committed stock, so it is used as-is."""
-    idx = {}
-    for row in _iter(PIPE17_INVENTORY_PATH, "inventory", api_key):
+def _index_rows(rows):
+    """Group raw inventory rows into {base_stem: {locationId: summed_available}},
+    rolling every version of a base together per location. `available` already
+    accounts for committed stock, so it is used as-is."""
+    out = {}
+    for row in rows:
         sku = row.get("sku")
         loc = row.get("locationId")
         if not sku or not loc:
             continue
-        idx.setdefault(sku, {})[loc] = _as_int(row.get("available"))
-    return idx
+        base = base_stem(sku)
+        locs = out.setdefault(base, {})
+        locs[loc] = locs.get(loc, 0) + _as_int(row.get("available"))
+    return out
+
+
+def inventory_by_base(api_key):
+    """{base_stem: {locationId: available}} for the whole catalog, one paginated scan."""
+    return _index_rows(_iter(PIPE17_INVENTORY_PATH, "inventory", api_key))
 
 
 # --- pure aggregation (unit-tested offline) --------------------------------
 
-def regional_available(sku, inv_index, country_map, country):
-    """Sum `available` for one product SKU across every location in `country`."""
+def regional_available(base_locs, country_map, country):
+    """Sum availability for one base across every location in `country`."""
     total = 0
-    for loc_id, avail in (inv_index.get(sku) or {}).items():
+    for loc_id, avail in (base_locs or {}).items():
         if country_map.get(loc_id) == country:
             total += avail or 0
     return total
 
 
-def compute_inventory(base_sku, resolver_us, resolver_ca, inv_index, country_map):
-    """Resolve the base SKU per channel and aggregate availability by region.
+def compute_inventory(base_sku, inv_by_base, country_map):
+    """Aggregate a base SKU's availability (all versions) by region.
 
-    Returns a dict with the resolved SKUs, their resolution status, the US/CA/total
-    numbers, and `matched` (False only when neither channel knows the base SKU, i.e.
-    there is no Pipe17 product behind it).
+    Returns the US/CA/total numbers and `matched` (False only when Pipe17 has no
+    inventory record for any SKU in the base's family — i.e. no product behind it).
     """
-    us_sku, us_status = resolver_us.resolve(base_sku)
-    ca_sku, ca_status = resolver_ca.resolve(base_sku)
-    inv_us = regional_available(us_sku, inv_index, country_map, "US")
-    inv_ca = regional_available(ca_sku, inv_index, country_map, "CA")
+    base_locs = inv_by_base.get(base_sku)
+    inv_us = regional_available(base_locs, country_map, "US")
+    inv_ca = regional_available(base_locs, country_map, "CA")
     return {
         "base_sku": base_sku,
-        "us_sku": us_sku, "us_status": us_status,
-        "ca_sku": ca_sku, "ca_status": ca_status,
         "inventory_us": inv_us,
         "inventory_ca": inv_ca,
         "inventory_total": inv_us + inv_ca,
-        "matched": us_status != "unresolved" or ca_status != "unresolved",
+        "matched": base_locs is not None,
     }
