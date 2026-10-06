@@ -15,6 +15,7 @@ on:
         options:
           - pipe17-airtable-sync
           - hubspot-pipe17-orders
+          - pipe17-hubspot-inventory
       args:
         description: "Optional container args override, comma-separated (e.g. main_hubspot_to_pipe17.py,--deal-id,65076828954). Blank = the job's default."
         type: string
