@@ -96,6 +96,9 @@ Touches no deals, orders, or the order/shipment sync.
   inventory step in `deploy-cloud-run.yml` and pushing.
 - Spot-check one SKU without scanning the whole catalog: **Actions → Run Cloud Run
   Job → `pipe17-hubspot-inventory`**, args `main_inventory_sync.py,--sku,11-01-00-40`.
+- Reads with `PIPE17_INVENTORY_READ_KEY` (bound to `pipe17-catalog-key` in the
+  deploy) — the B2B order-channel keys are not authorized for `/inventory` or
+  `/locations` (403), so the inventory job uses the broader catalog-scoped key.
 - Region split: each Pipe17 location is classified US/CA by its `address.country`
   (read live from `/locations`), so new warehouses need no code change. A base SKU's
   availability sums across its whole version family (bare base + every `-V` variant),
@@ -129,27 +132,34 @@ gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
 (If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
 the same invoker SA and a `*/20 * * * *` cadence.)
 
-## SKU resolution needs a catalog-scoped Pipe17 key
+## The catalog-scoped Pipe17 key (`pipe17-catalog-key`)
 
-Track B translates each HubSpot base SKU to the Pipe17 product SKU by reading the
-product catalog (`GET /products`) via `pipe17_catalog`. The B2B **order-channel**
-keys (`pipe17-api-key-us` / `-ca`) are **not** authorized for `/products` (they
-return 403), so resolution needs a dedicated catalog-scoped key.
+The B2B **order-channel** keys (`pipe17-api-key-us` / `-ca`) are only authorized for
+order ingestion — they return **403** on `/products`, `/inventory`, AND `/locations`.
+So both of these read with the broader catalog-scoped key `pipe17-catalog-key`:
 
-- Until one is configured, the resolver **fails open**: it logs a warning and sends
-  each line out with its base SKU unchanged (the pre-resolution behaviour), so order
-  creation keeps working — versioned items just won't be auto-translated.
-- To enable versioned resolution: store the catalog-scoped key as a secret (e.g.
-  `pipe17-catalog-key`) and add it to the **Track B** deploy step in
-  `deploy-cloud-run.yml`:
+- **Track B** — translates each HubSpot base SKU to the Pipe17 product SKU by reading
+  `/products`, via `PIPE17_CATALOG_API_KEY`. Until the key is wired the resolver
+  **fails open** (logs a warning, sends the base SKU as-is), so orders still create;
+  versioned items just aren't auto-translated.
+- **Inventory** — reads `/inventory` + `/locations`, via `PIPE17_INVENTORY_READ_KEY`.
 
-  ```
-  --set-secrets=...,PIPE17_CATALOG_API_KEY=pipe17-catalog-key:latest
-  ```
+Both are wired in `deploy-cloud-run.yml` (`PIPE17_CATALOG_API_KEY=pipe17-catalog-key`
+on Track B, `PIPE17_INVENTORY_READ_KEY=pipe17-catalog-key` on the inventory job).
 
-  Also grant the deployer SA `secretAccessor` on it (the `for S in ...` loop in the
-  one-time setup). The inventory job does **not** need this key — it reads
-  `/inventory` + `/locations` only.
+**Grant secret access to BOTH service accounts** (the deploy fails otherwise). Cloud
+Run jobs run as the default compute SA, which reads the secret at runtime, so it needs
+access too — not just the deployer SA:
+
+```bash
+PROJECT_ID=pipe17-b2bops
+PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+for SA in gh-deployer@$PROJECT_ID.iam.gserviceaccount.com \
+          $PROJECT_NUM-compute@developer.gserviceaccount.com; do
+  gcloud secrets add-iam-policy-binding pipe17-catalog-key --project "$PROJECT_ID" \
+    --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor
+done
+```
 
 ## Verifying / troubleshooting
 
