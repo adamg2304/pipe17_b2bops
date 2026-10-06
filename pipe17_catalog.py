@@ -11,19 +11,27 @@ Resolution per line (for the order's currency/channel):
   2. channel alias match     -> product whose published[sku]==base for this channel
   3. neither                 -> return base unchanged, status "unresolved"
 """
+import logging
 import time
 import requests
 
 from config import (
     PIPE17_API_BASE, PIPE17_AUTH_HEADER, PIPE17_API_KEY_US, PIPE17_API_KEY_CA,
-    CURRENCY_CHANNEL_INTEGRATION,
+    PIPE17_CATALOG_API_KEY, CURRENCY_CHANNEL_INTEGRATION,
 )
+
+log = logging.getLogger("pipe17-catalog")
 
 _PRODUCTS_PATH = "/products"
 _PAGE = 250
 
 
 def _api_key(currency):
+    # The product catalog is org-wide. The B2B order-channel keys are not authorized
+    # for /products (403), so prefer a dedicated catalog-scoped key when one is
+    # configured; otherwise fall back to the channel key (and fail open — see below).
+    if PIPE17_CATALOG_API_KEY:
+        return PIPE17_CATALOG_API_KEY
     return PIPE17_API_KEY_CA if (currency or "").upper() == "CAD" else PIPE17_API_KEY_US
 
 
@@ -61,23 +69,38 @@ class SkuResolver:
         self._product_skus = set()
         self._alias = {}
         self.collisions = {}
-        for p in _iter_products(_api_key(self.currency)):
-            sku = p.get("sku")
-            if sku:
-                self._product_skus.add(sku)
-            for pub in p.get("published") or []:
-                if pub.get("integrationId") != self.integration_id:
-                    continue
-                alias = pub.get("sku")
-                if not alias:
-                    continue
-                if alias in self._alias and self._alias[alias] != sku:
-                    self.collisions.setdefault(alias, {self._alias[alias]}).add(sku)
-                self._alias[alias] = sku
+        # Fail open: if the catalog can't be read (e.g. the channel key is not
+        # authorized for /products -> 403), don't take the order flow down. Leave
+        # the maps empty and pass SKUs through unchanged until a catalog-scoped key
+        # (PIPE17_CATALOG_API_KEY) is configured. Orders then go out with the base
+        # SKU, as they did before SKU resolution existed.
+        self.catalog_unavailable = False
+        try:
+            for p in _iter_products(_api_key(self.currency)):
+                sku = p.get("sku")
+                if sku:
+                    self._product_skus.add(sku)
+                for pub in p.get("published") or []:
+                    if pub.get("integrationId") != self.integration_id:
+                        continue
+                    alias = pub.get("sku")
+                    if not alias:
+                        continue
+                    if alias in self._alias and self._alias[alias] != sku:
+                        self.collisions.setdefault(alias, {self._alias[alias]}).add(sku)
+                    self._alias[alias] = sku
+        except Exception as e:
+            self.catalog_unavailable = True
+            log.warning("Pipe17 catalog read failed on %s channel (%s) — sending SKUs "
+                        "through unresolved. Set PIPE17_CATALOG_API_KEY to a key with "
+                        "/products read scope to enable versioned resolution.",
+                        self.currency, e)
 
     def resolve(self, base_sku):
         if not base_sku:
             return base_sku, "unresolved"
+        if self.catalog_unavailable:
+            return base_sku, "passthrough"
         if base_sku in self._product_skus:
             return base_sku, "exact"
         if base_sku in self._alias:

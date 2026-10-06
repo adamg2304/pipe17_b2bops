@@ -97,10 +97,11 @@ Touches no deals, orders, or the order/shipment sync.
 - Spot-check one SKU without scanning the whole catalog: **Actions → Run Cloud Run
   Job → `pipe17-hubspot-inventory`**, args `main_inventory_sync.py,--sku,11-01-00-40`.
 - Region split: each Pipe17 location is classified US/CA by its `address.country`
-  (read live from `/locations`), so new warehouses need no code change. The US number
-  reads the US-channel-aliased product at US locations; the CA number reads the
-  CA-channel-aliased product at CA locations (per-channel versioning, confirmed with
-  Adam). `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
+  (read live from `/locations`), so new warehouses need no code change. A base SKU's
+  availability sums across its whole version family (bare base + every `-V` variant),
+  bucketed purely by warehouse country — so stock on any version counts. The channel
+  Channel-SKU alias is NOT used here (it only governs which version an order draws).
+  `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
 
 ### Scheduler (every 20 min)
 
@@ -127,6 +128,28 @@ gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
 
 (If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
 the same invoker SA and a `*/20 * * * *` cadence.)
+
+## SKU resolution needs a catalog-scoped Pipe17 key
+
+Track B translates each HubSpot base SKU to the Pipe17 product SKU by reading the
+product catalog (`GET /products`) via `pipe17_catalog`. The B2B **order-channel**
+keys (`pipe17-api-key-us` / `-ca`) are **not** authorized for `/products` (they
+return 403), so resolution needs a dedicated catalog-scoped key.
+
+- Until one is configured, the resolver **fails open**: it logs a warning and sends
+  each line out with its base SKU unchanged (the pre-resolution behaviour), so order
+  creation keeps working — versioned items just won't be auto-translated.
+- To enable versioned resolution: store the catalog-scoped key as a secret (e.g.
+  `pipe17-catalog-key`) and add it to the **Track B** deploy step in
+  `deploy-cloud-run.yml`:
+
+  ```
+  --set-secrets=...,PIPE17_CATALOG_API_KEY=pipe17-catalog-key:latest
+  ```
+
+  Also grant the deployer SA `secretAccessor` on it (the `for S in ...` loop in the
+  one-time setup). The inventory job does **not** need this key — it reads
+  `/inventory` + `/locations` only.
 
 ## Verifying / troubleshooting
 
