@@ -48,7 +48,7 @@ for ROLE in roles/run.admin roles/cloudbuild.builds.editor \
 done
 
 # 3. Let the deployer read the 5 secrets the jobs reference.
-for S in pipe17-api-key airtable-pat pipe17-api-key-us pipe17-api-key-ca hubspot-token; do
+for S in pipe17-api-key airtable-pat pipe17-api-key-us pipe17-api-key-ca pipe17-catalog-key hubspot-token; do
   gcloud secrets add-iam-policy-binding "$S" --project "$PROJECT_ID" \
     --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor
 done
