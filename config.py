@@ -46,15 +46,42 @@ FIELD_LABELS = {
 SHIPMENT_NUMBER_FIELD = F_SHIPMENT_NUMBER
 SHIPMENT_ORDER_LINK_FIELD = F_ORDER_LINK
 ORDER_NUMBER_FIELD = "Order Number"   # NAME for filterByFormula (IDs not allowed there)
+SHIPMENT_NUMBER_NAME = "Shipment Number"   # NAME for filterByFormula (BLK-4 change detection)
 
 LOCATION_MAP = {"fcf8381c1cffc669": "Mantoria - Mississauga (MTO)"}
+# --- Shipment status model (PROVISIONAL — per 2026-09-25 B2B sync mtg) -------
+# Decision from that meeting: a shipment sitting in Pipe17 `readyForFulfillment`
+# reads as OUT OF STOCK (routed but not yet allocatable to a warehouse), and
+# `sentToFulfillment` reads as PROCESSING (routed + handed to the warehouse WMS).
+#
+# ⚠️ UNVERIFIED — confirm against the BLK-6 live automated-routing test before
+# trusting this. Live data 2026-09-29 (#BE650768289544) shows EVERY routed
+# shipment in `sentToFulfillment` even though the ORDER is out of stock; the OOS
+# signal appears at the ORDER level (order.routingStatus == "pendingInventory" /
+# eRouteOutOfStock exception), NOT on the shipping request. So on real routed
+# data the readyForFulfillment->Out of Stock mapping below may never fire, and
+# true OOS surfacing likely needs the order's routingStatus. Change status
+# strings/mappings HERE only — transform.py and main.py read these, never
+# hardcode the strings.
+PIPE17_STATUS_READY = os.environ.get("PIPE17_STATUS_READY", "readyForFulfillment")
+PIPE17_STATUS_SENT = os.environ.get("PIPE17_STATUS_SENT", "sentToFulfillment")
 STATUS_MAP = {
-    "draft": None, "new": "Processing", "readyForFulfillment": "Processing",
-    "readyToShip": "Ready to Book", "partialShipped": "In-Transit",
-    "shipped": "In-Transit", "inTransit": "In-Transit", "delivered": "Arrived",
-    "canceled": "Cancelled", "returned": "Cancelled",
+    "draft": None,
+    "new": "Processing",
+    PIPE17_STATUS_READY: "Out of Stock",   # provisional: ready-for-fulfillment == OOS
+    PIPE17_STATUS_SENT: "Processing",       # provisional: sent-to-fulfillment == processing
+    "readyToShip": "Ready to Book",
+    "partialShipped": "In-Transit",
+    "shipped": "In-Transit",
+    "inTransit": "In-Transit",
+    "delivered": "Arrived",
+    "canceled": "Cancelled",
+    "returned": "Cancelled",
 }
 DEFAULT_SHIPMENT_STATUS = None
+# Packing lists are generated only for shipments in these Pipe17 statuses (BLK-1/3):
+# a shipment must be handed to the warehouse before its pick list is real.
+PACKING_LIST_STATUSES = {PIPE17_STATUS_SENT}
 NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false").lower() == "true"
 
 # ============================================================================
