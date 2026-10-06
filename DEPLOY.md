@@ -129,6 +129,28 @@ gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
 (If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
 the same invoker SA and a `*/20 * * * *` cadence.)
 
+## SKU resolution needs a catalog-scoped Pipe17 key
+
+Track B translates each HubSpot base SKU to the Pipe17 product SKU by reading the
+product catalog (`GET /products`) via `pipe17_catalog`. The B2B **order-channel**
+keys (`pipe17-api-key-us` / `-ca`) are **not** authorized for `/products` (they
+return 403), so resolution needs a dedicated catalog-scoped key.
+
+- Until one is configured, the resolver **fails open**: it logs a warning and sends
+  each line out with its base SKU unchanged (the pre-resolution behaviour), so order
+  creation keeps working — versioned items just won't be auto-translated.
+- To enable versioned resolution: store the catalog-scoped key as a secret (e.g.
+  `pipe17-catalog-key`) and add it to the **Track B** deploy step in
+  `deploy-cloud-run.yml`:
+
+  ```
+  --set-secrets=...,PIPE17_CATALOG_API_KEY=pipe17-catalog-key:latest
+  ```
+
+  Also grant the deployer SA `secretAccessor` on it (the `for S in ...` loop in the
+  one-time setup). The inventory job does **not** need this key — it reads
+  `/inventory` + `/locations` only.
+
 ## Verifying / troubleshooting
 
 - Watch the run under the repo's **Actions** tab; the deploy step streams the same
