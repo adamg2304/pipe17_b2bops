@@ -73,7 +73,8 @@ check("Deal Name falls back (order # only, no contact/company)", rb.get(c.O_DEAL
 
 print("3) config sanity")
 check("Order upsert merges on Order Number id", c.ORDER_MERGE_FIELD == "fldE5XFShmJ2VZOzV")
-check("Track A watches readyForFulfillment", c.ORDER_SYNC_STATUSES == ["readyForFulfillment"])
+check("Track A watches readyForFulfillment + sentToFulfillment",
+      c.ORDER_SYNC_STATUSES == ["readyForFulfillment", "sentToFulfillment"])
 check("No derived fields written (Order Details/Notes left for later steps)",
       c.O_ORDER_DETAILS not in r and c.O_NOTES not in r)
 

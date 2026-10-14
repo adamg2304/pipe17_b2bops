@@ -87,7 +87,11 @@ NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false")
 # ============================================================================
 # ORDERS SYNC (Pipe17 -> Airtable Orders)  — gated by SYNC_ORDERS
 # ============================================================================
-ORDER_SYNC_STATUSES = ["readyForFulfillment"]  # Ops-approved (Draft -> "Mark Ready For Fulfillment")
+# Ops-approved and beyond: readyForFulfillment is where Ops marks an order ready, but an
+# order can advance to sentToFulfillment (routed/sent to the warehouse) between sync runs.
+# Since the Pipe17 query filters on current status, we watch both so a fast-routing order
+# isn't missed. Status on the Airtable row is create-only, so widening never re-stamps it.
+ORDER_SYNC_STATUSES = ["readyForFulfillment", "sentToFulfillment"]
 ORDER_STATUS_SEED = "No Shipments Found"
 
 O_ORDER_NUMBER = "fldE5XFShmJ2VZOzV"
