@@ -7,6 +7,7 @@ with the tag gate disabled, so an ungated write can't happen by accident.
 """
 import datetime as dt
 import logging
+import os
 import sys
 
 from config import (
@@ -219,9 +220,20 @@ def sync_shipments(since, tag):
             _generate_packing_lists(records, raw_by_num, prior_line_items)
 
 
+def _lookback_minutes():
+    """Normal runs use SYNC_LOOKBACK_MINUTES. A backfill can widen the window with
+    `--lookback-min N` (or the LOOKBACK_MIN env), e.g. to re-pull orders that advanced
+    past the sync window before a run caught them."""
+    for i, a in enumerate(sys.argv):
+        if a == "--lookback-min" and i + 1 < len(sys.argv):
+            return int(sys.argv[i + 1])
+    env = os.environ.get("LOOKBACK_MIN")
+    return int(env) if env else SYNC_LOOKBACK_MINUTES
+
+
 def main():
-    since = (dt.datetime.now(dt.timezone.utc)
-             - dt.timedelta(minutes=SYNC_LOOKBACK_MINUTES)).isoformat()
+    minutes = _lookback_minutes()
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)).isoformat()
     tag = PIPE17_TAG_FILTER.strip()
 
     # Fail-safe: never write with the tag gate disabled.
