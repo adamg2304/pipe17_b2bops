@@ -194,3 +194,27 @@ def run(dry_run, deal_id=None, order_suffix=""):
     if counts.get("failed"):
         raise RuntimeError(f"inventory-hold reconcile had {counts['failed']} failures")
     return counts
+
+
+def _arg(name):
+    import sys
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
+if __name__ == "__main__":
+    # Standalone dry-run entrypoint so the hold path can be exercised WITHOUT touching
+    # INVENTORY_HOLD_ENABLED (which only gates the path inside main_hubspot_to_pipe17).
+    # DRY_RUN defaults to "true", so this reads live HubSpot + Pipe17 but writes nothing;
+    # it logs the would-CREATE / would-UPDATE / would-CANCEL decisions per deal.
+    #   python hold_sync.py --deal-id 65791268757     # one deal (recommended first test)
+    #   python hold_sync.py                           # all in-window hold/RFO/lost deals
+    # To actually write (don't, until Ops automations exist): DRY_RUN=false python hold_sync.py --deal-id ...
+    import logging as _logging
+    from config import DRY_RUN
+    _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log.info("hold_sync standalone | mode=%s", "DRY_RUN" if DRY_RUN else "LIVE")
+    run(DRY_RUN, deal_id=_arg("--deal-id"), order_suffix=_arg("--order-suffix") or "")
