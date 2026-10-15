@@ -9,7 +9,7 @@ import requests
 
 from config import (
     PIPE17_API_BASE, PIPE17_ORDERS_PATH,
-    PIPE17_ORDER_UPDATE_PATH, PIPE17_ORDER_CANCEL_PATH,
+    PIPE17_ORDER_UPDATE_PATH, PIPE17_CANCELED_STATUS,
 )
 
 
@@ -53,14 +53,19 @@ def order_id_of(order):
 def update_order(order_id, order_body, api_key):
     """Re-sync a held order's line items / tags while it sits at Ready-for-Fulfillment
     (before its shipping requests are released). Pipe17 allows editing in that window.
-    PATCH path is env-overridable; verify against Pipe17 before live use."""
+    Pipe17 v3 update is PUT /api/v3/orders/{orderId} (confirmed against Pipe17's own
+    Flexport integration guide, which PUTs to that path to set status)."""
     path = PIPE17_ORDER_UPDATE_PATH.format(id=order_id)
-    resp = _request("PATCH", path, api_key, body=order_body)
+    resp = _request("PUT", path, api_key, body=order_body)
     return resp.get("order", resp)
 
 
 def cancel_order(order_id, api_key):
     """Cancel a held order to release the committed inventory (deal lost / hold
-    withdrawn before Ready for Ops). Path is env-overridable; verify before live use."""
-    resp = _request("POST", PIPE17_ORDER_CANCEL_PATH.format(id=order_id), api_key)
+    withdrawn before Ready for Ops). Pipe17 v3 has no dedicated cancel endpoint — the
+    same PUT /orders/{id} sets status=canceled. Safe only pre-release (hold_sync guards
+    to orders still carrying the hold tag); a released order's 3PL shipment is not
+    recalled by a status flip."""
+    path = PIPE17_ORDER_UPDATE_PATH.format(id=order_id)
+    resp = _request("PUT", path, api_key, body={"status": PIPE17_CANCELED_STATUS})
     return resp.get("order", resp)

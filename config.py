@@ -293,7 +293,9 @@ PIPE17_RFF_STATUS = os.environ.get("PIPE17_RFF_STATUS", "readyForFulfillment")
 PIPE17_HOLD_TAG = os.environ.get("PIPE17_HOLD_TAG", "B2BInventoryHold")
 PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConfirmReview")
 
-# REST paths for order update/cancel (Track B write path). Templates take {id}.
-# Verify against Pipe17 before live use; dry-run never calls them.
+# REST path for order update (Track B write path). Template takes {id}.
+# Pipe17 v3 updates an order with PUT /api/v3/orders/{orderId} (the method is in
+# pipe17_write). Cancellation uses the SAME PUT, setting status=PIPE17_CANCELED_STATUS
+# — Pipe17 v3 has no dedicated cancel endpoint; status is a settable field on PUT.
 PIPE17_ORDER_UPDATE_PATH = os.environ.get("PIPE17_ORDER_UPDATE_PATH", "/orders/{id}")
-PIPE17_ORDER_CANCEL_PATH = os.environ.get("PIPE17_ORDER_CANCEL_PATH", "/orders/{id}/cancel")
+PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
