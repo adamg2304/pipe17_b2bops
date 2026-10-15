@@ -32,10 +32,13 @@ def _request(method, path, api_key, params=None, body=None, max_retries=4):
 
 
 def get_order_by_ext_id(ext_order_id, api_key):
+    """Look an order up by its external id. keys=* is required so the response
+    carries lineItems and tags (the plain list view omits them) — the hold-sync
+    reconcile compares both against the desired order."""
     if not ext_order_id:
         return None
     data = _request("GET", PIPE17_ORDERS_PATH, api_key,
-                    params={"extOrderId": ext_order_id, "count": 1})
+                    params={"extOrderId": ext_order_id, "count": 1, "keys": "*"})
     orders = data.get("orders", [])
     return orders[0] if orders else None
 

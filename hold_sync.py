@@ -82,13 +82,33 @@ def _dedup(seq):
 
 
 def desired_tags(action, routing_tags):
-    """Tag set for the order. routing_tags already carries B2B + any shipping tags."""
+    """Tag set for a NEW order. routing_tags already carries B2B + any shipping tags."""
     routing = list(routing_tags or [])
     if action == "hold":
         return _dedup(routing + [PIPE17_HOLD_TAG])
     if action == "confirmed":
         return _dedup([PIPE17_AIRTABLE_TAG] + routing + [PIPE17_CONFIRM_REVIEW_TAG])
     return _dedup(routing)
+
+
+# Tags this reconcile owns and sets per state. Every other tag on an existing order
+# (freight tags like LTL, and anything Ops or a Pipe17 automation added) is preserved.
+_MANAGED_TAGS = (PIPE17_HOLD_TAG, PIPE17_CONFIRM_REVIEW_TAG, PIPE17_AIRTABLE_TAG)
+
+
+def merge_tags(existing_tags, action):
+    """Desired tags for an EXISTING order: keep every non-managed tag it already has,
+    then set only our managed tags for this state. hold -> +HOLD (no Airtable/review);
+    confirmed -> +Airtable +ConfirmReview, -HOLD (released). This never strips LTL or
+    Ops-added tags, which a from-scratch rebuild would."""
+    kept = [t for t in (existing_tags or []) if t not in _MANAGED_TAGS]
+    if action == "hold":
+        add = [PIPE17_HOLD_TAG]
+    elif action == "confirmed":
+        add = [PIPE17_AIRTABLE_TAG, PIPE17_CONFIRM_REVIEW_TAG]
+    else:
+        add = []
+    return _dedup(kept + add)
 
 
 def line_signature(line_items):
@@ -144,23 +164,32 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
             return "created", ext
 
         oid = p17w.order_id_of(existing) or ext
+        # Preserve the existing order's non-managed tags (LTL, Ops/automation tags);
+        # only flip our own state tags. Never rebuild the tag list from scratch.
+        desired = merge_tags(existing.get("tags"), action)
         sig_existing = line_signature(existing.get("lineItems"))
         sig_body = line_signature(body.get("lineItems"))
         same_lines = sig_existing == sig_body
-        same_tags = not tags_differ(existing.get("tags"), tags)
+        same_tags = not tags_differ(existing.get("tags"), desired)
+        same_status = str(existing.get("status") or "") == PIPE17_RFF_STATUS
         if not same_lines and _DEBUG:
             log.info("[DEBUG] %s line mismatch:\n  existing=%s\n  body    =%s",
                      ext, sig_existing, sig_body)
         if not same_tags and _DEBUG:
             log.info("[DEBUG] %s tag change: existing=%s desired=%s",
-                     ext, existing.get("tags"), tags)
-        if same_lines and same_tags:
+                     ext, existing.get("tags"), desired)
+        if same_lines and same_tags and same_status:
             return "unchanged", ext
         if dry_run:
-            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s)",
-                     action, ext, not same_lines, not same_tags)
+            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s status_changed=%s)",
+                     action, ext, not same_lines, not same_tags, not same_status)
             return "would_update", ext
-        p17w.update_order(oid, body, api_key)
+        # Minimal PUT: only the fields we own. Leave shippingAddress / customer alone so
+        # Ops edits survive. lineItems only when they actually changed.
+        update_body = {"status": PIPE17_RFF_STATUS, "tags": desired}
+        if not same_lines:
+            update_body["lineItems"] = body.get("lineItems")
+        p17w.update_order(oid, update_body, api_key)
         hs.set_pipe17_order_id(deal_id, str(oid))
         log.info("%s: updated Pipe17 order %s for deal %s", action, ext, deal_id)
         return "updated", ext

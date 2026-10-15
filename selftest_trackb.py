@@ -153,8 +153,9 @@ check("hold create writes pipe17_order_id back", hsf.set_calls == [("900001", "O
 res, *_ = reconcile(deal_with(HOLD_STAGE, True), dry_run=True)
 check("hold create DRY_RUN -> would_create (no write)", res == "would_create")
 
-# UNCHANGED: existing order already matches the desired hold shape
+# UNCHANGED: existing order already matches the desired hold shape (already at RFF)
 EXISTING_HOLD = {"orderId": "O1",
+                 "status": PIPE17_RFF_STATUS,
                  "lineItems": [{"sku": "11-03-00-50", "quantity": 2, "itemPrice": 250},
                                {"sku": "White Glove Delivery", "quantity": 1, "itemPrice": 100}],
                  "tags": ["White Glove", "B2B", PIPE17_HOLD_TAG]}
@@ -173,6 +174,19 @@ _, upd_body = p17.updated[0]
 check("confirmed swap: Airtable + B2BConfirmReview in, B2BInventoryHold out",
       PIPE17_AIRTABLE_TAG in upd_body["tags"] and PIPE17_CONFIRM_REVIEW_TAG in upd_body["tags"]
       and PIPE17_HOLD_TAG not in upd_body["tags"])
+
+# TAG PRESERVATION (regression): a non-managed freight tag (LTL) and any Ops-added tag
+# must survive a confirmed update — only our managed tags get flipped.
+EXISTING_WITH_LTL = {"orderId": "O3", "status": "draft",
+                     "lineItems": EXISTING_HOLD["lineItems"],
+                     "tags": [PIPE17_AIRTABLE_TAG, "Free Shipping", "B2B", "LTL"]}
+res, _, _, p17 = reconcile(deal_with(HS_READY_FOR_OPS_STAGE_ID, False), existing=EXISTING_WITH_LTL)
+_, upd_body = p17.updated[0]
+check("confirmed update preserves LTL + routing, adds ConfirmReview",
+      "LTL" in upd_body["tags"] and "Free Shipping" in upd_body["tags"]
+      and PIPE17_CONFIRM_REVIEW_TAG in upd_body["tags"])
+check("confirmed update flips draft -> readyForFulfillment",
+      upd_body["status"] == PIPE17_RFF_STATUS)
 
 # CANCEL: hold withdrawn (checkbox cleared) and order still held
 res, _, _, p17 = reconcile(deal_with(HOLD_STAGE, False), existing=EXISTING_HOLD)
