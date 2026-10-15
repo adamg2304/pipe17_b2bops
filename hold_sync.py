@@ -37,6 +37,9 @@ from config import (
 
 log = logging.getLogger("hubspot-pipe17")
 
+import os
+_DEBUG = os.environ.get("HOLD_SYNC_DEBUG", "false").lower() == "true"
+
 _HOLD_STAGES = {str(s) for s in HS_HOLD_STAGE_IDS}
 _RFO = str(HS_READY_FOR_OPS_STAGE_ID)
 _LOST = str(HS_LOST_STAGE_ID)
@@ -141,8 +144,16 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
             return "created", ext
 
         oid = p17w.order_id_of(existing) or ext
-        same_lines = line_signature(existing.get("lineItems")) == line_signature(body.get("lineItems"))
+        sig_existing = line_signature(existing.get("lineItems"))
+        sig_body = line_signature(body.get("lineItems"))
+        same_lines = sig_existing == sig_body
         same_tags = not tags_differ(existing.get("tags"), tags)
+        if not same_lines and _DEBUG:
+            log.info("[DEBUG] %s line mismatch:\n  existing=%s\n  body    =%s",
+                     ext, sig_existing, sig_body)
+        if not same_tags and _DEBUG:
+            log.info("[DEBUG] %s tag change: existing=%s desired=%s",
+                     ext, existing.get("tags"), tags)
         if same_lines and same_tags:
             return "unchanged", ext
         if dry_run:
