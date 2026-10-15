@@ -7,7 +7,10 @@ two keys. Auth header is X-Pipe17-Key (confirmed).
 import time
 import requests
 
-from config import PIPE17_API_BASE, PIPE17_ORDERS_PATH
+from config import (
+    PIPE17_API_BASE, PIPE17_ORDERS_PATH,
+    PIPE17_ORDER_UPDATE_PATH, PIPE17_ORDER_CANCEL_PATH,
+)
 
 
 def _headers(api_key):
@@ -39,4 +42,25 @@ def get_order_by_ext_id(ext_order_id, api_key):
 
 def create_order(order_body, api_key):
     resp = _request("POST", PIPE17_ORDERS_PATH, api_key, body=order_body)
+    return resp.get("order", resp)
+
+
+def order_id_of(order):
+    """The Pipe17 internal order id from a get/create response."""
+    return order.get("orderId") or order.get("id") if order else None
+
+
+def update_order(order_id, order_body, api_key):
+    """Re-sync a held order's line items / tags while it sits at Ready-for-Fulfillment
+    (before its shipping requests are released). Pipe17 allows editing in that window.
+    PATCH path is env-overridable; verify against Pipe17 before live use."""
+    path = PIPE17_ORDER_UPDATE_PATH.format(id=order_id)
+    resp = _request("PATCH", path, api_key, body=order_body)
+    return resp.get("order", resp)
+
+
+def cancel_order(order_id, api_key):
+    """Cancel a held order to release the committed inventory (deal lost / hold
+    withdrawn before Ready for Ops). Path is env-overridable; verify before live use."""
+    resp = _request("POST", PIPE17_ORDER_CANCEL_PATH.format(id=order_id), api_key)
     return resp.get("order", resp)

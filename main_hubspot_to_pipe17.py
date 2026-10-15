@@ -13,7 +13,7 @@ import json
 import logging
 import sys
 
-from config import DRY_RUN, HS_LOOKBACK_MINUTES, CURRENCY_API_KEY_MAP
+from config import DRY_RUN, HS_LOOKBACK_MINUTES, CURRENCY_API_KEY_MAP, INVENTORY_HOLD_ENABLED
 import hubspot_client as hs
 import pipe17_write as p17w
 from transform_order import build_order
@@ -33,6 +33,14 @@ def _arg(name):
 def main():
     deal_id_arg = _arg("--deal-id")
     order_suffix = _arg("--order-suffix") or ""
+
+    # V2 inventory-hold path (gated off by default). When enabled it handles both the
+    # hold trigger and the Ready-for-Ops/confirmed trigger on the same order, so it
+    # replaces the create-only loop below. When disabled, Track B behaves as before.
+    if INVENTORY_HOLD_ENABLED:
+        import hold_sync
+        hold_sync.run(DRY_RUN, deal_id=deal_id_arg, order_suffix=order_suffix)
+        return
 
     if deal_id_arg:
         log.info("Mode: %s | single deal %s", "DRY_RUN" if DRY_RUN else "LIVE", deal_id_arg)

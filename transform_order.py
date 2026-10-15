@@ -113,12 +113,17 @@ def _line_items(items, resolver):
     return out
 
 
-def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
+def build_order(deal, line_items, delivery_contact=None, order_suffix="", *,
+                status=None, tags=None):
     """Returns (order_body, currency, ext_order_id).
 
     order_suffix is appended to the minted extOrderId (default empty). Used for
     test iterations so a re-run of the same deal gets a fresh order number that
     doesn't collide with Pipe17's retained (cancelled) shipping-request keys.
+
+    status / tags override the defaults. Left None (the existing Ready-for-Ops
+    flow), the order is `draft` tagged Airtable + routing, exactly as before. The
+    inventory-hold path passes its own status (readyForFulfillment) and tag set.
     """
     props = deal.get("properties") or {}
     currency = currency_of(deal)
@@ -128,15 +133,16 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix=""):
     # (built once per currency per process; see pipe17_catalog).
     resolver = get_resolver(currency)
 
-    tags = [PIPE17_AIRTABLE_TAG]
-    if ORDER_ROUTING_TAGS:
-        for t in shipping_tags(line_items):
-            if t not in tags:
-                tags.append(t)
+    if tags is None:
+        tags = [PIPE17_AIRTABLE_TAG]
+        if ORDER_ROUTING_TAGS:
+            for t in shipping_tags(line_items):
+                if t not in tags:
+                    tags.append(t)
 
     body = {
         "extOrderId": ext_order_id,
-        "status": PIPE17_DRAFT_STATUS,
+        "status": status or PIPE17_DRAFT_STATUS,
         "currency": currency,
         "extOrderCreatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tags": tags,
