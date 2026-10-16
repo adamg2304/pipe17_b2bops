@@ -28,6 +28,28 @@ def find_record(table, field_name, value):
     return recs[0] if recs else None
 
 
+def list_records(table, formula, field_ids=None, page_size=100):
+    """All records matching a filterByFormula, paginated, keyed by field ID. Used by the
+    inventory-state recovery pass + backfill to read candidate orders FROM Airtable."""
+    url = f"{BASE}/{table}"
+    out, offset = [], None
+    while True:
+        params = [("filterByFormula", formula), ("pageSize", str(page_size)),
+                  ("returnFieldsByFieldId", "true")]
+        for fid in (field_ids or []):
+            params.append(("fields[]", fid))
+        if offset:
+            params.append(("offset", offset))
+        resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        out.extend(data.get("records", []))
+        offset = data.get("offset")
+        if not offset:
+            break
+    return out
+
+
 def update_record(table, record_id, fields):
     """PATCH fields (keyed by field ID) onto one record — e.g. clear an attachment."""
     url = f"{BASE}/{table}/{record_id}"
