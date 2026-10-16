@@ -55,11 +55,13 @@ def _crosslinks(order):
 
 
 def _order_line_items_json(line_items):
-    """{"Product ID": [], "Quantity": [...], "SKU": [...]} for real product lines.
+    """{"Product ID": [...], "Quantity": [...], "SKU": [...]} for real product lines.
 
-    Product ID stays empty (Pipe17 has no Shopify product id). Service lines
-    (requiresShipping == False, e.g. "White Glove Delivery") are excluded, matching
-    the existing connector's output, which kept only shippable products.
+    The three arrays are kept the SAME length so downstream automations that zip them
+    stay aligned. Product ID has no real value (Pipe17 carries no Shopify product id),
+    so it is padded with one blank per line rather than left as an empty array, which
+    is what broke downstream parsing. Service lines (requiresShipping == False, e.g.
+    "White Glove Delivery") are excluded, matching the existing connector's output.
     """
     skus, qtys = [], []
     for li in line_items or []:
@@ -70,7 +72,7 @@ def _order_line_items_json(line_items):
             continue
         skus.append(sku)
         qtys.append(li.get("quantity"))
-    return json.dumps({"Product ID": [], "Quantity": qtys, "SKU": skus})
+    return json.dumps({"Product ID": [""] * len(skus), "Quantity": qtys, "SKU": skus})
 
 
 def _contact(order):

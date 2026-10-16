@@ -46,7 +46,8 @@ check("City / State / Zip", (r.get(c.O_CITY), r.get(c.O_STATE), r.get(c.O_ZIP_CO
 li = json.loads(r.get(c.O_ORDER_LINE_ITEMS))
 check("Line items keep the product SKU", li["SKU"] == ["11-01-00-54"])
 check("Line items drop the White Glove service line", "White Glove Delivery" not in li["SKU"])
-check("Product ID empty (no Shopify id in Pipe17)", li["Product ID"] == [])
+check("Product ID padded blank, same length as SKU (no Shopify id in Pipe17)",
+      li["Product ID"] == [""] and len(li["Product ID"]) == len(li["SKU"]) == len(li["Quantity"]))
 check("Gate tag 'Airtable' stripped from Order Tags", c.O_ORDER_TAGS not in r)
 # contact now lands from shippingAddress (the whole point of the change)
 check("Customer Name from shippingAddress", r.get(c.O_CUSTOMER_NAME) == "Adam Goldstein")

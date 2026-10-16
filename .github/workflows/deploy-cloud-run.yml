@@ -65,7 +65,7 @@ jobs:
             --region "$GCP_REGION" \
             --tasks 1 --max-retries 1 \
             --command python --args main.py \
-            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest \
+            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest \
             --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,SYNC_LOOKBACK_MINUTES=90,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true
 
       - name: Deploy Track B (hubspot-pipe17-orders)
@@ -96,17 +96,16 @@ jobs:
         if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'reconcile' }}
         run: |
           # Backstop for Track A: a wide-window sweep that heals orders the frequent
-          # run missed, and reports drift to Slack. Schedule it daily (Cloud Scheduler,
-          # same pattern as the other jobs) once deployed.
-          # Slack alerts are OFF until the slack-webhook-url secret exists and is wired
-          # in: add `,SLACK_WEBHOOK_URL=slack-webhook-url:latest` to --set-secrets below
-          # (create the secret first, or this deploy step fails). notify.py no-ops
-          # safely without it, so the sweep still heals in the meantime.
+          # run missed, and reports drift to Slack. Scheduled daily via Cloud Scheduler
+          # (pipe17-airtable-sync-reconcile-daily).
+          # SLACK_WEBHOOK_URL comes from the slack-webhook-url secret; it MUST exist in
+          # Secret Manager before this deploy runs or the step fails. notify.py no-ops
+          # safely if the value is empty, so healing still works regardless.
           gcloud run jobs deploy pipe17-airtable-sync-reconcile \
             --source . \
             --project "$GCP_PROJECT" \
             --region "$GCP_REGION" \
             --tasks 1 --max-retries 1 \
             --command python --args main_reconcile.py \
-            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest \
+            --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest \
             --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,RECONCILE_LOOKBACK_DAYS=14,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true

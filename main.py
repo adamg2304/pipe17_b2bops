@@ -181,6 +181,7 @@ def sync_shipments(since, tag):
         return order_link_cache[ext_order_id]
 
     shipments, skipped = [], 0
+    unmatched_orders = set()
     for sr in p17.iter_shipping_requests(since, tag=tag or None):
         if tag and tag not in (sr.get("tags") or []):
             skipped += 1
@@ -188,9 +189,12 @@ def sync_shipments(since, tag):
         fields = shipment_to_airtable(sr)
         if not fields.get(SHIPMENT_NUMBER_FIELD):
             continue
-        rec_id = resolve_order_link(order_number_of(sr))
+        ext_order_id = order_number_of(sr)
+        rec_id = resolve_order_link(ext_order_id)
         if rec_id:
             fields[SHIPMENT_ORDER_LINK_FIELD] = [rec_id]
+        else:
+            unmatched_orders.add(ext_order_id)
         shipments.append(fields)
         raw_by_num[fields[SHIPMENT_NUMBER_FIELD]] = sr
 
@@ -198,8 +202,13 @@ def sync_shipments(since, tag):
              len(shipments), skipped, tag)
     linked = sum(1 for f in shipments if SHIPMENT_ORDER_LINK_FIELD in f)
     if shipments and linked < len(shipments):
-        log.warning("%d/%d shipments had no matching Order row (Order Link left empty)",
-                    len(shipments) - linked, len(shipments))
+        # Name the offenders: a tagged shipment whose order has no Orders row. Usually an
+        # order that is no longer in a synced status (ORDER_SYNC_STATUSES), so the order
+        # sync won't create it — the shipment links to nothing. Logging the ids makes the
+        # gap actionable instead of a bare count.
+        log.warning("%d/%d shipments had no matching Order row (Order Link left empty): %s",
+                    len(shipments) - linked, len(shipments),
+                    ", ".join(sorted(o for o in unmatched_orders if o)))
 
     if shipments and DRY_RUN:
         log.info("DRY_RUN: not writing. Sample of mapped records:")
