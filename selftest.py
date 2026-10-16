@@ -82,6 +82,17 @@ def main():
         failures.append("sentToFulfillment should map to 'Processing'")
     if _status_of("whoKnows") is not None:
         failures.append("unknown status should leave Status unset")
+    if _status_of("reviewRequired") != "Processing":
+        failures.append("reviewRequired should map to 'Processing'")
+
+    # Origin WH resolves from a live location_map (the real warehouse name, no static table)
+    sr_wh = {"extShipmentId": "#WH.1", "status": "reviewRequired", "lineItems": [],
+             "shippingAddress": {}, "locationId": "7e17305c31fc642e"}
+    live_map = {"7e17305c31fc642e": "Tradewinds - Westfield (TRW)"}
+    if shipment_to_airtable(sr_wh, location_map=live_map).get(F_ORIGIN_WH) != "Tradewinds - Westfield (TRW)":
+        failures.append("location_map should resolve Origin WH to the live warehouse name")
+    if F_ORIGIN_WH in shipment_to_airtable(sr_wh, location_map={}):
+        failures.append("empty location_map should leave Origin WH blank, not error")
 
     print()
     if failures:

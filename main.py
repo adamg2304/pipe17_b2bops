@@ -180,13 +180,27 @@ def sync_shipments(since, tag):
                 ORDERS_TABLE, ORDER_NUMBER_FIELD, ext_order_id)
         return order_link_cache[ext_order_id]
 
+    # Resolve warehouse names live from Pipe17 /locations (needs the org-wide read key),
+    # so Origin WH is the real name, not a hand-maintained table. Fall back to the static
+    # LOCATION_MAP if the lookup fails, so a locations hiccup never blocks the sync.
+    from config import LOCATION_MAP, PIPE17_INVENTORY_READ_KEY
+    loc_map = LOCATION_MAP
+    try:
+        import pipe17_inventory
+        live = pipe17_inventory.location_name_map(PIPE17_INVENTORY_READ_KEY)
+        if live:
+            loc_map = live
+            log.info("Resolved %d Pipe17 warehouse names for Origin WH", len(live))
+    except Exception:
+        log.exception("Could not read Pipe17 /locations; using static LOCATION_MAP for Origin WH")
+
     shipments, skipped = [], 0
     unmatched_orders = set()
     for sr in p17.iter_shipping_requests(since, tag=tag or None):
         if tag and tag not in (sr.get("tags") or []):
             skipped += 1
             continue
-        fields = shipment_to_airtable(sr)
+        fields = shipment_to_airtable(sr, location_map=loc_map)
         if not fields.get(SHIPMENT_NUMBER_FIELD):
             continue
         ext_order_id = order_number_of(sr)

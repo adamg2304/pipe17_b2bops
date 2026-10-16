@@ -25,7 +25,11 @@ def _fmt_line_items(line_items):
     return "; ".join(parts)
 
 
-def shipment_to_airtable(sr):
+def shipment_to_airtable(sr, location_map=None):
+    """location_map {locationId: warehouse name} resolves Origin WH. main.py builds it
+    live from Pipe17 /locations each run; falls back to the static LOCATION_MAP when not
+    provided (keeps the pure-function tests working with no network)."""
+    location_map = location_map if location_map is not None else LOCATION_MAP
     addr = sr.get("shippingAddress") or {}
     name = " ".join(x for x in [addr.get("firstName"), addr.get("lastName")] if x).strip()
     fields = {
@@ -40,7 +44,7 @@ def shipment_to_airtable(sr):
     state = addr.get("stateOrProvince")
     if state:
         fields[F_STATE] = state
-    wh = LOCATION_MAP.get(sr.get("locationId"))
+    wh = location_map.get(sr.get("locationId"))
     if wh:
         fields[F_ORIGIN_WH] = wh
     status = STATUS_MAP.get(sr.get("status"), DEFAULT_SHIPMENT_STATUS)
