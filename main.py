@@ -52,6 +52,9 @@ def sync_orders(since, tag):
             if is_new:   # first time we see this order Ops-approved -> write back to HubSpot
                 new_orders.append(o)
     log.info("Orders: mapped %d (%d skipped: missing '%s' tag)", len(orders), skipped, tag)
+    # Order numbers that had no Airtable row yet — i.e. the drift the reconcile sweep
+    # heals. Populated whether or not we actually write (DRY_RUN reports would-create).
+    created_numbers = [o.get("extOrderId") for o in new_orders]
     if orders and DRY_RUN:
         log.info("DRY_RUN: not writing %d orders. Sample:", len(orders))
         for f in orders[:5]:
@@ -63,6 +66,7 @@ def sync_orders(since, tag):
             _generate_order_slips(records, raw_by_num)
         if WRITEBACK_DEAL_ON_APPROVAL:
             _writeback_deals(new_orders)
+    return created_numbers
 
 
 def _generate_order_slips(records, raw_by_num):
@@ -254,6 +258,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as e:
         log.exception("Sync failed")
+        import notify
+        notify.slack(f":rotating_light: Pipe17 -> Airtable sync FAILED: {e}")
         sys.exit(1)
