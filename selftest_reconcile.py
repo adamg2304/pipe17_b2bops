@@ -80,5 +80,34 @@ check("heals only the order missing from Airtable", healed == ["#BE_NEW"])
 check("does not re-heal an order already present", "#BE_OLD" not in healed)
 check("untagged order is skipped entirely", "#BE_UNTAGGED" not in healed)
 
+
+# --- iter_orders queries one status per request (the readyForFulfillment bug) ---
+import pipe17_client as pc
+
+status_calls = []
+
+
+def _fake_get(path, params=None, max_retries=4):
+    st = (params or {}).get("status")
+    status_calls.append(st)
+    if st == "readyForFulfillment":
+        rows = [{"orderId": "rff1"}, {"orderId": "shared"}]
+    elif st == "sentToFulfillment":
+        rows = [{"orderId": "stf1"}, {"orderId": "shared"}]
+    else:
+        rows = []
+    return {"orders": rows, "pagination": {"last": True}}
+
+
+pc._get = _fake_get
+got = list(pc.iter_orders("2026-01-01T00:00:00Z", tag="Airtable",
+                          statuses=["readyForFulfillment", "sentToFulfillment"]))
+ids = [o["orderId"] for o in got]
+check("iter_orders issues one request per status", status_calls == ["readyForFulfillment", "sentToFulfillment"])
+check("iter_orders never sends a status list (the repeated-param bug)",
+      all(not isinstance(s, list) for s in status_calls))
+check("iter_orders yields orders from both statuses", {"rff1", "stf1"} <= set(ids))
+check("iter_orders dedups an order seen under two statuses", ids.count("shared") == 1)
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

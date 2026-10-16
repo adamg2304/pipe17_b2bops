@@ -45,12 +45,29 @@ def iter_shipping_requests(updated_since_iso, tag=None, page_size=100):
 
 
 def iter_orders(updated_since_iso, tag=None, statuses=None, page_size=100):
-    extra = {}
+    """Yield tagged orders in the window. Each status is queried on its OWN request:
+    passing several as one `status` list makes requests send a repeated query param
+    (status=a&status=b), and Pipe17 honors only one of them — which silently dropped
+    every readyForFulfillment order once sentToFulfillment was added alongside it.
+    One request per status (a single value) is the behavior Pipe17 actually honors.
+    Results are de-duplicated in case an order changes status between the calls."""
+    base = {}
     if tag:
-        extra["tags"] = tag
-    if statuses:
-        extra["status"] = statuses
-    yield from _iter(PIPE17_ORDERS_PATH, "orders", updated_since_iso, page_size, extra or None)
+        base["tags"] = tag
+    status_values = list(statuses) if statuses else [None]
+    seen = set()
+    for status in status_values:
+        extra = dict(base)
+        if status:
+            extra["status"] = status
+        for order in _iter(PIPE17_ORDERS_PATH, "orders", updated_since_iso, page_size,
+                           extra or None):
+            key = order.get("orderId") or order.get("id") or order.get("extOrderId")
+            if key is not None and key in seen:
+                continue
+            if key is not None:
+                seen.add(key)
+            yield order
 
 
 def get_customer(customer_id):
