@@ -75,3 +75,22 @@ def get_customer(customer_id):
         return {}
     data = _get(f"/customers/{customer_id}")
     return data.get("customer", data) or {}
+
+
+def get_order_by_ext_id(ext_order_id):
+    """One order by external id (read path). Used by the inventory-state recovery pass +
+    backfill to re-fetch an order's live state from Pipe17."""
+    if not ext_order_id:
+        return None
+    data = _get(PIPE17_ORDERS_PATH, params={"extOrderId": ext_order_id, "count": 1, "keys": "*"})
+    orders = data.get("orders", [])
+    return orders[0] if orders else None
+
+
+def get_order_shipments(ext_order_id):
+    """Every shipping request for one order (by external id). Low volume, so fetching per
+    order is fine. Used to compute routed-vs-ordered for Inventory State."""
+    if not ext_order_id:
+        return []
+    data = _get(PIPE17_SHIPMENTS_PATH, params={"extOrderId": ext_order_id, "count": 100, "keys": "*"})
+    return data.get("shipments", []) or []

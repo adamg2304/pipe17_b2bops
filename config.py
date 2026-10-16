@@ -123,6 +123,33 @@ O_HUBSPOT_DEAL_LINK = "fldpzcSrzXgjXkSYH"   # HubSpot deal deep link
 O_PIPE17_ORDER_LINK = "fldl2GDoFDZZ4C73Z"   # Pipe17 order deep link
 ORDER_MERGE_FIELD = O_ORDER_NUMBER
 
+# --- Inventory State + OOS exception note (sync-owned; Status stays base-computed) ---
+# Inventory State is a singleSelect; its options are confirmed exact strings — the sync
+# only ever writes one of these, and never typecasts a new option into existence.
+O_INVENTORY_STATE = os.environ.get("O_INVENTORY_STATE", "fldICzs3CaqWVf26r")
+O_EXCEPTION_FLAG = os.environ.get("O_EXCEPTION_FLAG", "fldkvCt6rHrbT6Yne")  # multilineText
+INV_FULLY_IN_STOCK = "Fully In Stock"
+INV_PARTIALLY_OOS = "Partially Out of Stock"
+INV_AWAITING = "Awaiting Inventory"
+INVENTORY_STATE_OPTIONS = (INV_FULLY_IN_STOCK, INV_PARTIALLY_OOS, INV_AWAITING)
+# Signal inputs (names Pipe17 uses on the order object).
+OOS_EXCEPTION = os.environ.get("OOS_EXCEPTION", "eRouteOutOfStock")
+ROUTING_PENDING_INVENTORY = os.environ.get("ROUTING_PENDING_INVENTORY", "pendingInventory")
+ROUTING_EXCLUDED = os.environ.get("ROUTING_EXCLUDED", "excluded")
+# An order in one of these statuses is not actively awaiting inventory (active guard):
+# don't flag it, and clear any prior flag. Makes the sticky eRouteOutOfStock safe.
+INACTIVE_ORDER_STATUSES = tuple(
+    s for s in os.environ.get("INACTIVE_ORDER_STATUSES", "archived,canceled").split(",") if s)
+# Recovery pass scopes OUT done orders so its Airtable query stays bounded. The base's
+# done value is "Completed" (the task said "Complete"; the field's actual option is
+# "Completed").
+RECOVERY_DONE_STATUSES = tuple(
+    s for s in os.environ.get("RECOVERY_DONE_STATUSES", "Completed").split(",") if s)
+# Field NAMES (filterByFormula uses names, not ids) for the recovery/backfill queries.
+INVENTORY_STATE_NAME = os.environ.get("INVENTORY_STATE_NAME", "Inventory State")
+STATUS_FIELD_NAME = os.environ.get("STATUS_FIELD_NAME", "Status")
+PIPE17_ORDER_ID_NAME = os.environ.get("PIPE17_ORDER_ID_NAME", "Pipe17 Order ID")
+
 # ===========================================================================
 # Track B  (HubSpot deposit-paid deals -> Pipe17 draft sales orders)
 # ===========================================================================
