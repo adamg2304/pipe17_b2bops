@@ -76,6 +76,18 @@ def location_country_map(api_key):
     return out
 
 
+def location_name_map(api_key):
+    """{locationId: name} from /locations. Lets the shipment sync paste the warehouse
+    name straight from Pipe17 instead of maintaining a hardcoded id->name table, so new
+    or renamed warehouses map automatically."""
+    out = {}
+    for loc in _iter(PIPE17_LOCATIONS_PATH, "locations", api_key):
+        loc_id, name = loc.get("locationId"), loc.get("name")
+        if loc_id and name:
+            out[loc_id] = name
+    return out
+
+
 def _as_int(value):
     try:
         return int(value)

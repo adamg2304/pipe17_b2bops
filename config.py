@@ -74,6 +74,8 @@ STATUS_MAP = {
     "new": "Processing",
     PIPE17_STATUS_READY: "Out of Stock",   # provisional: ready-for-fulfillment == OOS
     PIPE17_STATUS_SENT: "Processing",       # provisional: sent-to-fulfillment == processing
+    "reviewRequired": "Processing",         # SR parked in the Ops review gate; OOS (if any)
+                                            # surfaces at the ORDER level, not on the SR status
     "readyToShip": "Ready to Book",
     "partialShipped": "In-Transit",
     "shipped": "In-Transit",
