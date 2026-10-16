@@ -10,6 +10,10 @@ PIPE17_SHIPMENTS_PATH = os.environ.get("PIPE17_SHIPMENTS_PATH", "/shipments")
 PIPE17_ORDERS_PATH = os.environ.get("PIPE17_ORDERS_PATH", "/orders")
 
 SYNC_LOOKBACK_MINUTES = int(os.environ.get("SYNC_LOOKBACK_MINUTES", "60"))
+# Reconcile sweep window (main_reconcile.py). Wide on purpose: it re-checks every
+# eligible order over this many days and heals any missing from Airtable, so a single
+# missed/failed frequent run never drops an order permanently.
+RECONCILE_LOOKBACK_DAYS = int(os.environ.get("RECONCILE_LOOKBACK_DAYS", "14"))
 PIPE17_TAG_FILTER = os.environ.get("PIPE17_TAG_FILTER", "Airtable")
 SYNC_ORDERS = os.environ.get("SYNC_ORDERS", "false").lower() == "true"
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
