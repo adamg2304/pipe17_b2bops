@@ -50,12 +50,18 @@ def _changed(current, new):
 
 def main():
     only_sku = _arg("--sku")
+    # Per-run overrides so a live dry-run needs no env change on the deployed job:
+    #   --dry-run     force DRY_RUN for this run (never writes)
+    #   --line-items  force the line-item fan-out on for this run
+    dry_run = DRY_RUN or ("--dry-run" in sys.argv)
+    do_line_items = (INVENTORY_LINE_ITEM_SYNC or "--line-items" in sys.argv) and not only_sku
     read_key = PIPE17_INVENTORY_READ_KEY
     if not read_key:
         log.error("No Pipe17 API key for inventory reads (PIPE17_INVENTORY_READ_KEY).")
         sys.exit(1)
 
-    log.info("Mode: %s%s", "DRY_RUN" if DRY_RUN else "LIVE",
+    log.info("Mode: %s | products%s%s", "DRY_RUN" if dry_run else "LIVE",
+             " + line items" if do_line_items else "",
              f" | single SKU {only_sku}" if only_sku else "")
 
     # Build the shared lookups once per run.
@@ -75,14 +81,14 @@ def main():
             _memo[base] = inv.compute_inventory(base, inv_by_base, country_map)
         return _memo[base]
 
-    _sync_products(compute, only_sku)
-    if INVENTORY_LINE_ITEM_SYNC and not only_sku:
-        _sync_line_items(compute)
+    _sync_products(compute, only_sku, dry_run)
+    if do_line_items:
+        _sync_line_items(compute, dry_run)
     elif INVENTORY_LINE_ITEM_SYNC and only_sku:
         log.info("Line-item sync skipped: --sku is a product-only probe.")
 
 
-def _sync_products(compute, only_sku):
+def _sync_products(compute, only_sku, dry_run):
     updates = []
     seen = matched = unmatched = no_sku = unchanged = 0
     for product in hsp.iter_products():
@@ -113,20 +119,20 @@ def _sync_products(compute, only_sku):
 
         log.info("product %s -> US=%d  CA=%d  total=%d%s",
                  base_sku, r["inventory_us"], r["inventory_ca"], r["inventory_total"],
-                 "  [DRY_RUN]" if DRY_RUN else "")
+                 "  [DRY_RUN]" if dry_run else "")
         updates.append({"id": product["id"], "properties": props})
 
     written = 0
-    if updates and not DRY_RUN:
+    if updates and not dry_run:
         written = hsp.batch_update(updates)
 
     log.info("Products done. seen=%d matched=%d unmatched=%d no_sku=%d unchanged=%d "
              "to_write=%d written=%d%s",
              seen, matched, unmatched, no_sku, unchanged, len(updates), written,
-             " (DRY_RUN: nothing written)" if DRY_RUN else "")
+             " (DRY_RUN: nothing written)" if dry_run else "")
 
 
-def _sync_line_items(compute):
+def _sync_line_items(compute, dry_run):
     """Stamp all three inventory numbers onto every line item of an active deal.
     Same memoized compute as the product pass; the line item's SKU is normalized to
     its base-SKU family (base_stem) so a versioned line-item SKU rolls up the same
@@ -159,13 +165,13 @@ def _sync_line_items(compute):
                         "properties": hsli.inventory_properties(new_us, new_ca, new_total)})
 
     written = 0
-    if updates and not DRY_RUN:
+    if updates and not dry_run:
         written = hsli.batch_update(updates)
 
     log.info("Line items done. seen=%d matched=%d unmatched=%d no_sku=%d unchanged=%d "
              "to_write=%d written=%d%s",
              seen, matched, unmatched, no_sku, unchanged, len(updates), written,
-             " (DRY_RUN: nothing written)" if DRY_RUN else "")
+             " (DRY_RUN: nothing written)" if dry_run else "")
 
 
 if __name__ == "__main__":

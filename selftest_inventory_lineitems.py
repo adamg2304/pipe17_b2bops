@@ -33,12 +33,7 @@ def run_line_items(line_items, dry_run=False):
     captured = []
     m.hsli.iter_active_deal_line_items = lambda: iter(line_items)
     m.hsli.batch_update = lambda updates: captured.extend(updates) or len(updates)
-    old_dry = m.DRY_RUN
-    m.DRY_RUN = dry_run
-    try:
-        m._sync_line_items(_compute)
-    finally:
-        m.DRY_RUN = old_dry
+    m._sync_line_items(_compute, dry_run)
     return captured
 
 
@@ -76,19 +71,14 @@ got = run_line_items([{"id": "li5", "sku": None,
                        "inventory_us": None, "inventory_ca": None, "inventory_total": None}])
 check("no-SKU line item skipped", got == [])
 
-# Case 6: DRY_RUN writes nothing (batch_update never called).
+# Case 6: dry_run writes nothing (batch_update never called).
 dry_called = {"n": 0}
 m.hsli.iter_active_deal_line_items = lambda: iter(
     [{"id": "li6", "sku": "11-01-00-50", "inventory_us": None,
       "inventory_ca": None, "inventory_total": None}])
 m.hsli.batch_update = lambda updates: dry_called.__setitem__("n", dry_called["n"] + 1)
-_dry = m.DRY_RUN
-m.DRY_RUN = True
-try:
-    m._sync_line_items(_compute)
-finally:
-    m.DRY_RUN = _dry
-check("DRY_RUN writes nothing", dry_called["n"] == 0)
+m._sync_line_items(_compute, dry_run=True)
+check("dry_run writes nothing", dry_called["n"] == 0)
 
 # Case 7: drift guard — product and line item resolve to the SAME numbers for the
 # same SKU, because both go through the one memoized compute.

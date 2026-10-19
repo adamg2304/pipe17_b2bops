@@ -325,8 +325,13 @@ HS_LINE_ITEM_SKU_PROP = os.environ.get("HS_LINE_ITEM_SKU_PROP", HS_LI_PROPS["sku
 HS_LI_INVENTORY_US_PROP = os.environ.get("HS_LI_INVENTORY_US_PROP", HS_INVENTORY_US_PROP)
 HS_LI_INVENTORY_CA_PROP = os.environ.get("HS_LI_INVENTORY_CA_PROP", HS_INVENTORY_CA_PROP)
 HS_LI_INVENTORY_TOTAL_PROP = os.environ.get("HS_LI_INVENTORY_TOTAL_PROP", HS_INVENTORY_TOTAL_PROP)
-# "Active deal" filter for the fan-out. Default: open deals only (hs_is_closed=false),
-# so closed/won deals' historical line items are never rewritten. Override the
-# property/value for a different notion of active (e.g. a specific pipeline stage).
-HS_ACTIVE_DEAL_FILTER_PROP = os.environ.get("HS_ACTIVE_DEAL_FILTER_PROP", "hs_is_closed")
-HS_ACTIVE_DEAL_FILTER_VALUE = os.environ.get("HS_ACTIVE_DEAL_FILTER_VALUE", "false")
+# "Active deal" = these Sales Pipeline stages only (confirmed with Adam):
+#   Qualified (qualifiedtobuy), Quote Sent (1523817), Buyer Engaged (11586560),
+#   Committed Deal (1492994), Deposit Invoice Sent (1492995).
+# Stage IDs are globally unique in HubSpot, so a dealstage IN filter needs no
+# pipeline filter. Every other stage — including closed/won and anything past
+# deposit — is excluded, so those deals' line items are never rewritten.
+HS_ACTIVE_DEAL_STAGE_PROP = os.environ.get("HS_ACTIVE_DEAL_STAGE_PROP", "dealstage")
+HS_ACTIVE_DEAL_STAGES = tuple(s for s in os.environ.get(
+    "HS_ACTIVE_DEAL_STAGES",
+    "qualifiedtobuy,1523817,11586560,1492994,1492995").split(",") if s)
