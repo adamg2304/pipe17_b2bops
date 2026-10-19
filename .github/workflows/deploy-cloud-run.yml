@@ -90,7 +90,7 @@ jobs:
             --tasks 1 --max-retries 1 \
             --command python --args main_inventory_sync.py \
             --set-secrets=PIPE17_INVENTORY_READ_KEY=pipe17-catalog-key:latest,HUBSPOT_TOKEN=hubspot-token:latest \
-            --set-env-vars=DRY_RUN=false
+            --set-env-vars=DRY_RUN=false,INVENTORY_LINE_ITEM_SYNC=true
 
       - name: Deploy Reconcile sweep (pipe17-airtable-sync-reconcile)
         if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'reconcile' }}
