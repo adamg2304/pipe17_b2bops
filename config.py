@@ -304,3 +304,29 @@ HS_PRODUCT_SKU_PROP = os.environ.get("HS_PRODUCT_SKU_PROP", "hs_sku")
 HS_INVENTORY_US_PROP = os.environ.get("HS_INVENTORY_US_PROP", "inventory_us")
 HS_INVENTORY_CA_PROP = os.environ.get("HS_INVENTORY_CA_PROP", "inventory_ca")
 HS_INVENTORY_TOTAL_PROP = os.environ.get("HS_INVENTORY_TOTAL_PROP", "inventory_total")
+
+# --- Line-item inventory fan-out (same run, gated OFF) ----------------------
+# HubSpot can't report on products, only on line items of deals, so the same
+# inventory numbers are also stamped onto every line item of an active deal. This
+# is a fan-out of the SAME per-SKU computation the product write uses, in the SAME
+# run off one Pipe17 snapshot — product and line item can't drift. Our job writes
+# ALL THREE numbers (us/ca/total) onto every active-deal line item unconditionally;
+# it does NOT choose US vs CA. Bojana's HubSpot workflows read whichever applies to
+# the deal's region and derive the inventory-health status. Build-only until the
+# line-item properties exist in HubSpot and Ops is ready; with the flag off the
+# inventory job behaves exactly as today (products only).
+INVENTORY_LINE_ITEM_SYNC = os.environ.get("INVENTORY_LINE_ITEM_SYNC", "false").lower() == "true"
+HS_LINE_ITEM_OBJECT = os.environ.get("HS_LINE_ITEM_OBJECT", "line_items")
+# Line items created from a product carry its SKU on hs_sku (same prop Track B reads).
+HS_LINE_ITEM_SKU_PROP = os.environ.get("HS_LINE_ITEM_SKU_PROP", HS_LI_PROPS["sku"])
+# Line-item number properties. Default to the same internal names as the product
+# props; override if HubSpot creates them under different names on the line_item
+# object. CONFIRM the exact internal names before enabling the flag.
+HS_LI_INVENTORY_US_PROP = os.environ.get("HS_LI_INVENTORY_US_PROP", HS_INVENTORY_US_PROP)
+HS_LI_INVENTORY_CA_PROP = os.environ.get("HS_LI_INVENTORY_CA_PROP", HS_INVENTORY_CA_PROP)
+HS_LI_INVENTORY_TOTAL_PROP = os.environ.get("HS_LI_INVENTORY_TOTAL_PROP", HS_INVENTORY_TOTAL_PROP)
+# "Active deal" filter for the fan-out. Default: open deals only (hs_is_closed=false),
+# so closed/won deals' historical line items are never rewritten. Override the
+# property/value for a different notion of active (e.g. a specific pipeline stage).
+HS_ACTIVE_DEAL_FILTER_PROP = os.environ.get("HS_ACTIVE_DEAL_FILTER_PROP", "hs_is_closed")
+HS_ACTIVE_DEAL_FILTER_VALUE = os.environ.get("HS_ACTIVE_DEAL_FILTER_VALUE", "false")
