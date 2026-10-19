@@ -69,13 +69,21 @@ LOCATION_MAP = {"fcf8381c1cffc669": "Mantoria - Mississauga (MTO)"}
 # hardcode the strings.
 PIPE17_STATUS_READY = os.environ.get("PIPE17_STATUS_READY", "readyForFulfillment")
 PIPE17_STATUS_SENT = os.environ.get("PIPE17_STATUS_SENT", "sentToFulfillment")
+# "Processing" used to cover both reviewRequired (parked in the Ops review gate, no
+# packing list yet) and sentToFulfillment (handed to the warehouse, packing list
+# generated). That conflation made an SR read as "Processing" with no Shipment
+# Details and no way to tell why. reviewRequired now has its own label so the status
+# alone tells Ops whether a packing list is due: "In Review" = not yet, "Processing"
+# = sent to the warehouse (packing list present). Env-overridable.
+SHIP_STATUS_IN_REVIEW = os.environ.get("SHIP_STATUS_IN_REVIEW", "In Review")
+SHIP_STATUS_PROCESSING = os.environ.get("SHIP_STATUS_PROCESSING", "Processing")
 STATUS_MAP = {
     "draft": None,
-    "new": "Processing",
-    PIPE17_STATUS_READY: "Out of Stock",   # provisional: ready-for-fulfillment == OOS
-    PIPE17_STATUS_SENT: "Processing",       # provisional: sent-to-fulfillment == processing
-    "reviewRequired": "Processing",         # SR parked in the Ops review gate; OOS (if any)
-                                            # surfaces at the ORDER level, not on the SR status
+    "new": SHIP_STATUS_PROCESSING,
+    PIPE17_STATUS_READY: "Out of Stock",      # provisional: ready-for-fulfillment == OOS
+    PIPE17_STATUS_SENT: SHIP_STATUS_PROCESSING,  # sent-to-fulfillment: handed to warehouse, packing list generated
+    "reviewRequired": SHIP_STATUS_IN_REVIEW,  # parked in the Ops review gate, no packing list yet;
+                                              # OOS (if any) surfaces at the ORDER level, not the SR
     "readyToShip": "Ready to Book",
     "partialShipped": "In-Transit",
     "shipped": "In-Transit",
