@@ -296,3 +296,39 @@ HS_PRODUCT_SKU_PROP = os.environ.get("HS_PRODUCT_SKU_PROP", "hs_sku")
 HS_INVENTORY_US_PROP = os.environ.get("HS_INVENTORY_US_PROP", "inventory_us")
 HS_INVENTORY_CA_PROP = os.environ.get("HS_INVENTORY_CA_PROP", "inventory_ca")
 HS_INVENTORY_TOTAL_PROP = os.environ.get("HS_INVENTORY_TOTAL_PROP", "inventory_total")
+
+# ===========================================================================
+# Inventory hold (V2) — Track B second trigger: lock inventory for a deal before
+# it's paid, on the SAME Pipe17 order the Ready-for-Ops flow later releases.
+# Build-only / dry-run testable. Gated OFF by default; when disabled, Track B
+# behaves exactly as before (this whole path is skipped).
+# ===========================================================================
+INVENTORY_HOLD_ENABLED = os.environ.get("INVENTORY_HOLD_ENABLED", "false").lower() == "true"
+
+# HubSpot deal signals.
+HS_INVENTORY_HOLD_PROP = os.environ.get("HS_INVENTORY_HOLD_PROP", "inventory_hold_approved")  # bool
+HS_DEAL_STAGE_PROP = os.environ.get("HS_DEAL_STAGE_PROP", "dealstage")
+# Post-quote, pre-Ready-for-Ops stages where a hold can be placed (Quote Sent,
+# Buyer Engaged, Committed Deal, Deposit Invoice Sent). Env override is comma-sep.
+HS_HOLD_STAGE_IDS = tuple(s for s in os.environ.get(
+    "HS_HOLD_STAGE_IDS", "1523817,11586560,1492994,1492995").split(",") if s)
+HS_READY_FOR_OPS_STAGE_ID = os.environ.get("HS_READY_FOR_OPS_STAGE_ID", HS_DEPOSIT_PAID_STAGE_ID)  # 10492961
+HS_LOST_STAGE_ID = os.environ.get("HS_LOST_STAGE_ID", "closedlost")  # stage supersedes the checkbox
+
+# Every order (hold or confirmed) is created at Ready-for-Fulfillment so inventory
+# commits and shipping requests are generated; an Ops tag-automation parks the SRs
+# in Review Required until released. Distinguished by tag:
+#   held  -> B2BInventoryHold, NOT Airtable (Track A ignores unpaid holds)
+#   confirmed/released -> B2BConfirmReview + Airtable (Ops reviews, then releases)
+# The two review tags each need a matching Pipe17 order-automation (Ops/Harry own
+# those). Names are env-overridable so they match whatever the automations key on.
+PIPE17_RFF_STATUS = os.environ.get("PIPE17_RFF_STATUS", "readyForFulfillment")
+PIPE17_HOLD_TAG = os.environ.get("PIPE17_HOLD_TAG", "B2BInventoryHold")
+PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConfirmReview")
+
+# REST path for order update (Track B write path). Template takes {id}.
+# Pipe17 v3 updates an order with PUT /api/v3/orders/{orderId} (the method is in
+# pipe17_write). Cancellation uses the SAME PUT, setting status=PIPE17_CANCELED_STATUS
+# — Pipe17 v3 has no dedicated cancel endpoint; status is a settable field on PUT.
+PIPE17_ORDER_UPDATE_PATH = os.environ.get("PIPE17_ORDER_UPDATE_PATH", "/orders/{id}")
+PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")

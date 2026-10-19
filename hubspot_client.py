@@ -9,6 +9,8 @@ from config import (
     HS_DEAL_PIPELINE_ID, HS_PIPE17_ORDER_ID_PROP,
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_LI_PROPS,
     HS_DELIVERY_CONTACT_LABEL,
+    HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP,
+    HS_HOLD_STAGE_IDS, HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID,
 )
 
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
@@ -29,7 +31,8 @@ def _request(method, path, **kwargs):
 
 
 def _deal_properties():
-    props = {HS_CURRENCY_PROP, HS_PIPE17_ORDER_ID_PROP, "dealname", "amount"}
+    props = {HS_CURRENCY_PROP, HS_PIPE17_ORDER_ID_PROP, "dealname", "amount",
+             HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP}
     props.update(v for v in HS_SHIP_ADDR_PROPS.values() if v)
     return sorted(props)
 
@@ -57,6 +60,38 @@ def find_deposit_paid_deals(since_epoch_ms):
     while True:
         body = {
             "filterGroups": _search_filters(since_epoch_ms),
+            "properties": _deal_properties(),
+            "limit": 100,
+            "sorts": [{"propertyName": "hs_lastmodifieddate", "direction": "ASCENDING"}],
+        }
+        if after:
+            body["after"] = after
+        data = _request("POST", "/crm/v3/objects/deals/search", json=body)
+        for row in data.get("results", []):
+            yield row
+        after = (data.get("paging") or {}).get("next", {}).get("after")
+        if not after:
+            break
+        time.sleep(0.2)
+
+
+def find_hold_sync_deals(since_epoch_ms):
+    """V2 (inventory hold): deals modified in the window whose stage is a hold stage,
+    Ready for Ops, OR Closed lost. Unlike find_deposit_paid_deals this does NOT filter
+    out already-synced deals (pipe17_order_id), because the update / cancel / release
+    paths all act on deals that already carry an order. Per-deal branching (create vs
+    update vs cancel vs release vs noop) happens in hold_sync."""
+    stages = list(HS_HOLD_STAGE_IDS) + [HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID]
+    after = None
+    while True:
+        filters = [
+            {"propertyName": "dealstage", "operator": "IN", "values": stages},
+            {"propertyName": "hs_lastmodifieddate", "operator": "GTE", "value": since_epoch_ms},
+        ]
+        if HS_DEAL_PIPELINE_ID:
+            filters.append({"propertyName": "pipeline", "operator": "EQ", "value": HS_DEAL_PIPELINE_ID})
+        body = {
+            "filterGroups": [{"filters": filters}],
             "properties": _deal_properties(),
             "limit": 100,
             "sorts": [{"propertyName": "hs_lastmodifieddate", "direction": "ASCENDING"}],
