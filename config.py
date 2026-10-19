@@ -270,6 +270,14 @@ GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower()
 O_ORDER_ATTACHMENTS = "fldo34yjW8UPZKNJ5"        # Orders multipleAttachments — order slip PDF
 SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments — packing list PDF
 
+# Public hosting for the order-slip PDF: the sync uploads it to a public GCS bucket and
+# writes the stable public URL into the Order Details field (O_ORDER_DETAILS). When the
+# bucket env is unset the upload no-ops (the attachment still happens), so the sync runs
+# safely before the bucket exists. The object path carries a random suffix so URLs are
+# not enumerable (order slips carry customer + pricing data).
+GCS_ORDER_SLIP_BUCKET = os.environ.get("GCS_ORDER_SLIP_BUCKET", "")
+GCS_ORDER_SLIP_PREFIX = os.environ.get("GCS_ORDER_SLIP_PREFIX", "order-slips/")
+
 # ===========================================================================
 # Inventory sync  (Pipe17 Available -> HubSpot product properties)
 # ===========================================================================
