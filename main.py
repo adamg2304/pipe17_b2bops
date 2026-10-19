@@ -15,7 +15,7 @@ from config import (
     ORDERS_TABLE, SHIPMENTS_TABLE,
     ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD, FIELD_LABELS,
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
-    GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS,
+    GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS, O_ORDER_DETAILS,
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
     WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
@@ -32,6 +32,7 @@ from order_transform import order_to_airtable
 import inventory_state
 import docs_render
 import airtable_attach
+import gcs_upload
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("pipe17-airtable")
@@ -81,23 +82,42 @@ def sync_orders(since, tag):
 
 
 def _generate_order_slips(records, raw_by_num):
-    """Render + attach an order slip to each order that doesn't already have one."""
-    made = 0
+    """Render the order slip once, attach it to Airtable if missing, and publish a public
+    copy to GCS whose URL goes in Order Details if that's missing. Each side is gated
+    independently so a backlog row (attachment present, URL empty) still gets its URL."""
+    attached = urls = 0
     for rec in records:
         f = rec.get("fields", {})
         num = f.get(O_ORDER_NUMBER)
         order = raw_by_num.get(num)
-        if not order or f.get(O_ORDER_ATTACHMENTS):   # unknown, or slip already present
+        if not order:
+            continue
+        need_attach = not f.get(O_ORDER_ATTACHMENTS)
+        need_url = not f.get(O_ORDER_DETAILS)
+        if not (need_attach or need_url):
             continue
         try:
             pdf = docs_render.render_pdf(docs_render.order_slip_html(order))
-            fname = "OrderSlip_%s.pdf" % (str(num or "order").lstrip("#"))
-            airtable_attach.attach_pdf(rec["id"], O_ORDER_ATTACHMENTS, fname, pdf)
-            made += 1
         except Exception:
-            log.exception("Order slip failed for %s", num)
-    if made:
-        log.info("Order slips generated + attached: %d", made)
+            log.exception("Order slip render failed for %s", num)
+            continue
+        if need_attach:
+            try:
+                fname = "OrderSlip_%s.pdf" % (str(num or "order").lstrip("#"))
+                airtable_attach.attach_pdf(rec["id"], O_ORDER_ATTACHMENTS, fname, pdf)
+                attached += 1
+            except Exception:
+                log.exception("Order slip attach failed for %s", num)
+        if need_url:
+            try:
+                public_url = gcs_upload.upload_order_slip(num, pdf)
+                if public_url:
+                    at.update_record(ORDERS_TABLE, rec["id"], {O_ORDER_DETAILS: public_url})
+                    urls += 1
+            except Exception:
+                log.exception("Order slip public-URL upload failed for %s", num)
+    if attached or urls:
+        log.info("Order slips: %d attached, %d public URLs written", attached, urls)
 
 
 def _hubspot_deal_id(order):

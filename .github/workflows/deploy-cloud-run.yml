@@ -66,7 +66,7 @@ jobs:
             --tasks 1 --max-retries 1 \
             --command python --args main.py \
             --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest,PIPE17_INVENTORY_READ_KEY=pipe17-catalog-key:latest \
-            --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,SYNC_LOOKBACK_MINUTES=90,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true
+            --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,SYNC_LOOKBACK_MINUTES=90,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true,GCS_ORDER_SLIP_BUCKET=pipe17-order-slips-public
 
       - name: Deploy Track B (hubspot-pipe17-orders)
         if: ${{ github.event_name == 'push' || inputs.target == 'both' || inputs.target == 'track-b' }}
@@ -108,4 +108,4 @@ jobs:
             --tasks 1 --max-retries 1 \
             --command python --args main_reconcile.py \
             --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,HUBSPOT_TOKEN=hubspot-token:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest,PIPE17_INVENTORY_READ_KEY=pipe17-catalog-key:latest \
-            --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,RECONCILE_LOOKBACK_DAYS=14,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true
+            --set-env-vars=SYNC_ORDERS=true,PIPE17_TAG_FILTER=Airtable,DRY_RUN=false,RECONCILE_LOOKBACK_DAYS=14,GENERATE_ORDER_SLIP=true,GENERATE_PACKING_LIST=true,GCS_ORDER_SLIP_BUCKET=pipe17-order-slips-public
