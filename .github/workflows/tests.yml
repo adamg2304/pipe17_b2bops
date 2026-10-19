@@ -28,3 +28,5 @@ jobs:
           python selftest_trackb.py
           python selftest_inventory.py
           python selftest_catalog.py
+          python selftest_reconcile.py
+          python selftest_inventory_state.py

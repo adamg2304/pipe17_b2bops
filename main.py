@@ -20,12 +20,16 @@ from config import (
     WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
     PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS,
+    O_INVENTORY_STATE, O_EXCEPTION_FLAG,
+    INVENTORY_STATE_NAME, STATUS_FIELD_NAME, PIPE17_ORDER_ID_NAME,
+    RECOVERY_DONE_STATUSES, INV_AWAITING, INV_PARTIALLY_OOS,
 )
 import pipe17_client as p17
 import airtable_client as at
 import hubspot_client as hs
 from transform import shipment_to_airtable, order_number_of
 from order_transform import order_to_airtable
+import inventory_state
 import docs_render
 import airtable_attach
 
@@ -47,6 +51,13 @@ def sync_orders(since, tag):
         is_new = at.find_record_id(ORDERS_TABLE, ORDER_NUMBER_FIELD, ext_order_id) is None
         fields = order_to_airtable(o, cust, is_new=is_new)
         if fields.get(O_ORDER_NUMBER):
+            # Inventory State + Exception Flag, computed from the order + its SRs. Never
+            # writes Status. Per-order failure is logged and never blocks the run.
+            try:
+                srs = p17.get_order_shipments(ext_order_id)
+                inventory_state.apply_to_fields(fields, o, srs, O_INVENTORY_STATE, O_EXCEPTION_FLAG)
+            except Exception:
+                log.exception("Inventory State compute failed for order %s", ext_order_id)
             orders.append(fields)
             raw_by_num[ext_order_id] = o
             if is_new:   # first time we see this order Ops-approved -> write back to HubSpot
@@ -247,6 +258,63 @@ def sync_shipments(since, tag):
             _generate_packing_lists(records, raw_by_num, prior_line_items)
 
 
+# --- Inventory State recovery + backfill (read FROM Airtable, recompute from Pipe17) ---
+
+def _not_done_clauses():
+    return ['NOT({%s}="%s")' % (STATUS_FIELD_NAME, s) for s in RECOVERY_DONE_STATUSES]
+
+
+def _reconcile_inventory_state(formula, label, dry_run):
+    """Read Orders matching `formula` FROM Airtable, re-fetch each order + its SRs from
+    Pipe17, recompute Inventory State + Exception Flag, and write the result. Idempotent;
+    per-record errors are logged and never block. The UNSET case (still routing) writes
+    nothing. Never writes Status."""
+    records = at.list_records(ORDERS_TABLE, formula, field_ids=[O_ORDER_NUMBER])
+    log.info("%s: %d candidate order rows", label, len(records))
+    wrote = left = failed = 0
+    for rec in records:
+        num = (rec.get("fields") or {}).get(O_ORDER_NUMBER)
+        if not num:
+            continue
+        try:
+            order = p17.get_order_by_ext_id(num)
+            if not order:
+                left += 1
+                continue
+            srs = p17.get_order_shipments(num)
+            fields = {}
+            inventory_state.apply_to_fields(fields, order, srs, O_INVENTORY_STATE, O_EXCEPTION_FLAG)
+            if not fields:   # UNSET -> leave the row's fields as they are
+                left += 1
+                continue
+            if dry_run:
+                log.info("[DRY_RUN] %s %s -> %s", label, num, fields)
+            else:
+                at.update_record(ORDERS_TABLE, rec["id"], fields)
+            wrote += 1
+        except Exception:
+            failed += 1
+            log.exception("%s: failed for order %s", label, num)
+    log.info("%s done: wrote=%d left-as-is=%d failed=%d", label, wrote, left, failed)
+    return wrote, left, failed
+
+
+def recovery_pass(dry_run):
+    """Each run: re-check already-flagged, not-done orders straight from Airtable (not the
+    updatedSince window), so stock that returned gets cleared to Fully In Stock."""
+    flagged = "OR(%s)" % ",".join('{%s}="%s"' % (INVENTORY_STATE_NAME, v)
+                                  for v in (INV_AWAITING, INV_PARTIALLY_OOS))
+    formula = "AND(%s)" % ",".join([flagged] + _not_done_clauses())
+    return _reconcile_inventory_state(formula, "Inventory recovery", dry_run)
+
+
+def backfill_inventory_state(dry_run):
+    """One-time, idempotent: set initial Inventory State / Exception Flag on existing
+    non-done orders that carry a Pipe17 Order ID (the sync-managed set)."""
+    formula = "AND(%s)" % ",".join(['NOT({%s}="")' % PIPE17_ORDER_ID_NAME] + _not_done_clauses())
+    return _reconcile_inventory_state(formula, "Inventory backfill", dry_run)
+
+
 def _lookback_minutes():
     """Normal runs use SYNC_LOOKBACK_MINUTES. A backfill can widen the window with
     `--lookback-min N` (or the LOOKBACK_MIN env), e.g. to re-pull orders that advanced
@@ -259,6 +327,12 @@ def _lookback_minutes():
 
 
 def main():
+    # One-time inventory-state backfill mode (idempotent); does nothing else.
+    if "--backfill-inventory-state" in sys.argv:
+        log.info("Mode: inventory-state backfill | DRY_RUN=%s", DRY_RUN)
+        backfill_inventory_state(DRY_RUN)
+        return
+
     minutes = _lookback_minutes()
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)).isoformat()
     tag = PIPE17_TAG_FILTER.strip()
@@ -274,6 +348,13 @@ def main():
     if SYNC_ORDERS:
         sync_orders(since, tag)      # orders first: parents exist before shipments link
     sync_shipments(since, tag)
+
+    # Recovery pass: re-check already-flagged, not-done orders straight from Airtable
+    # (independent of the updatedSince window), so returned stock clears to Fully In Stock.
+    try:
+        recovery_pass(DRY_RUN)
+    except Exception:
+        log.exception("Inventory recovery pass failed (continuing)")
 
     log.info("Sync complete.")
 
