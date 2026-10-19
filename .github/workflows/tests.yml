@@ -31,3 +31,4 @@ jobs:
           python selftest_reconcile.py
           python selftest_inventory_state.py
           python selftest_orderslip.py
+          python selftest_inventory_lineitems.py
