@@ -82,8 +82,8 @@ def main():
         failures.append("sentToFulfillment should map to 'Processing'")
     if _status_of("whoKnows") is not None:
         failures.append("unknown status should leave Status unset")
-    if _status_of("reviewRequired") != "Processing":
-        failures.append("reviewRequired should map to 'Processing'")
+    if _status_of("reviewRequired") != "In Review":
+        failures.append("reviewRequired should map to 'In Review' (distinct from sent-to-fulfillment 'Processing')")
 
     # Origin WH resolves from a live location_map (the real warehouse name, no static table)
     sr_wh = {"extShipmentId": "#WH.1", "status": "reviewRequired", "lineItems": [],
