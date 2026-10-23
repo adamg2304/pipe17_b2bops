@@ -19,7 +19,7 @@ from config import (
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
     WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
-    PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS,
+    PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS, F_STATUS, SHIP_STATUS_RANK,
     O_INVENTORY_STATE, O_EXCEPTION_FLAG,
     INVENTORY_STATE_NAME, STATUS_FIELD_NAME, PIPE17_ORDER_ID_NAME,
     RECOVERY_DONE_STATUSES, INV_AWAITING, INV_PARTIALLY_OOS,
@@ -199,6 +199,22 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
         log.info("Packing lists generated + attached: %d", made)
 
 
+def _status_regresses(current, new):
+    """True when writing `new` as the shipment Status would move it BACKWARD past the
+    status Airtable already shows. Keeps Status forward-only: a blank current status is
+    fine to write; a current status we don't manage (human/custom) is never clobbered;
+    otherwise a write is only allowed to hold or advance the rank, never lower it."""
+    if not current:
+        return False
+    cr = SHIP_STATUS_RANK.get(current)
+    if cr is None:
+        return True            # unmanaged current value — preserve it
+    nr = SHIP_STATUS_RANK.get(new)
+    if nr is None:
+        return False           # unmanaged new value (shouldn't happen) — allow the write
+    return nr < cr
+
+
 def sync_shipments(since, tag):
     order_link_cache = {}
     raw_by_num = {}
@@ -263,15 +279,26 @@ def sync_shipments(since, tag):
             log.info("  %s -> Order Link %s | %s", f.get(SHIPMENT_NUMBER_FIELD),
                      f.get(SHIPMENT_ORDER_LINK_FIELD, "(none)"), readable)
     elif shipments:
-        # BLK-4: capture each row's stored Line Items BEFORE the upsert overwrites them,
-        # so the packing-list step can tell when a shipment re-split/re-routed and its
-        # contents changed under the same Shipment Number.
-        prior_line_items = {}
-        if GENERATE_PACKING_LIST:
-            for num in raw_by_num:
-                existing = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, num)
-                if existing:
-                    prior_line_items[num] = (existing.get("fields") or {}).get(F_LINE_ITEMS)
+        # Read each existing row's stored fields once, BEFORE the upsert overwrites them.
+        # Used for (a) the forward-only Status guard below, and (b) BLK-4 Line Items change
+        # detection so the packing-list step knows when a shipment re-split/re-routed.
+        prior = {}
+        for num in raw_by_num:
+            existing = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, num)
+            if existing:
+                prior[num] = existing.get("fields") or {}
+        # Forward-only Status: drop the Status write when Pipe17's status would move the
+        # row backward past what Airtable already shows (ops book/ship ahead of Pipe17).
+        held = 0
+        for f in shipments:
+            num = f.get(SHIPMENT_NUMBER_FIELD)
+            if F_STATUS in f and _status_regresses(prior.get(num, {}).get(F_STATUS), f[F_STATUS]):
+                del f[F_STATUS]
+                held += 1
+        if held:
+            log.info("Status held forward-only on %d shipment(s) (Airtable ahead of Pipe17)", held)
+        prior_line_items = ({num: pf.get(F_LINE_ITEMS) for num, pf in prior.items()}
+                            if GENERATE_PACKING_LIST else {})
         created, updated, records = at.upsert(SHIPMENTS_TABLE, shipments, [SHIPMENT_NUMBER_FIELD])
         log.info("Shipments upserted: %d created, %d updated", created, updated)
         if GENERATE_PACKING_LIST:

@@ -93,6 +93,22 @@ STATUS_MAP = {
     "returned": "Cancelled",
 }
 DEFAULT_SHIPMENT_STATUS = None
+# Shipment Status is forward-only. Ops/warehouse advance the Airtable status (book ->
+# ship -> deliver) ahead of Pipe17, which lags: an SR can sit at sentToFulfillment
+# ("Processing") while the warehouse has already booked it to "Ready to Book". The sync
+# must not drag that status back to the lagging Pipe17 value. A Status write is
+# suppressed when it would move the row BACKWARD in this progression; a blank or
+# unmanaged current status is never overwritten (preserves a human/Airtable-set value).
+# Ranks define the ordering only — their absolute values don't matter.
+SHIP_STATUS_RANK = {
+    "Out of Stock": 1,
+    SHIP_STATUS_IN_REVIEW: 2,
+    SHIP_STATUS_PROCESSING: 3,
+    "Ready to Book": 4,
+    "In-Transit": 5,
+    "Arrived": 6,
+    "Cancelled": 7,
+}
 # Packing lists are generated only for shipments in these Pipe17 statuses (BLK-1/3):
 # a shipment must be handed to the warehouse before its pick list is real.
 PACKING_LIST_STATUSES = {PIPE17_STATUS_SENT}
