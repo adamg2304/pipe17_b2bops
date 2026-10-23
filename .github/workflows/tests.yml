@@ -32,4 +32,5 @@ jobs:
           python selftest_inventory_state.py
           python selftest_orderslip.py
           python selftest_inventory_lineitems.py
+          python selftest_shipment_status.py
           python selftest_repair.py

@@ -1,6 +1,6 @@
 """Render Branch order slips / packing lists to PDF (wkhtmltopdf via pdfkit).
 
-order_slip_html(order)      -> HTML for an ORDER-level slip (parent products + prices)
+order_slip_html(order)      -> HTML for an ORDER-level slip (parent products + qty, no prices)
 packing_list_html(shipment) -> HTML for a SHIPMENT-level packing list (child/box SKUs, no prices)
 render_pdf(html)            -> PDF bytes
 
@@ -83,28 +83,19 @@ _BASE_CSS = """
 
 
 def order_slip_html(order):
+    # Pricing is deliberately omitted: this slip is a warehouse/ops + freight-facing
+    # document (attached to Airtable, published to the Order Details URL), so it carries
+    # items and quantities only — never unit price, line amount, or order totals.
     addr = order.get("shippingAddress") or {}
-    cur = order.get("currency", "USD")
     order_no = _esc(order.get("extOrderId"))
     date = _esc((order.get("extOrderCreatedAt") or order.get("createdAt") or "")[:10])
 
     rows = ""
     for li in order.get("lineItems") or []:
         qty = li.get("quantity") or 0
-        price = li.get("itemPrice") or 0
         rows += (f'<tr><td><div class="nm">{_esc(li.get("name"))}</div>'
                  f'<div class="sku">{_esc(li.get("sku"))}</div></td>'
-                 f'<td class="num">{qty}</td>'
-                 f'<td class="num">{_money(price, cur)}</td>'
-                 f'<td class="num">{_money((qty or 0) * (price or 0), cur)}</td></tr>')
-
-    subtotal = order.get("subTotalPrice")
-    total = order.get("totalPrice")
-    tax = order.get("orderTax")
-    totals = f'<tr><td class="lab">Subtotal</td><td class="val">{_money(subtotal, cur)}</td></tr>'
-    if tax:
-        totals += f'<tr><td class="lab">Tax</td><td class="val">{_money(tax, cur)}</td></tr>'
-    totals += f'<tr class="grand"><td class="lab">Total ({_esc(cur)})</td><td class="val">{_money(total, cur)}</td></tr>'
+                 f'<td class="num">{qty}</td></tr>')
 
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>{_BASE_CSS}</style></head><body>
   <div class="top"><span class="doctype">Order Slip</span>{("<img class=\"logo\" src=\"" + _LOGO + "\"/>") if _LOGO else "<span class=\"brand\">BRANCH</span>"}</div>
@@ -114,9 +105,8 @@ def order_slip_html(order):
     <td><div class="lbl">Contact</div>{_esc(addr.get("email")) or "&nbsp;"}<br>{_esc(addr.get("phone"))}</td>
   </tr></table>
   <table class="items"><thead><tr>
-    <th>Item</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Amount</th>
+    <th>Item</th><th class="num">Qty</th>
   </tr></thead><tbody>{rows}</tbody></table>
-  <table class="totals" align="right"><tr><td></td></tr>{totals}</table>
   <div class="foot">&#10022; &#10022; &#10022;</div>
 </body></html>"""
 
