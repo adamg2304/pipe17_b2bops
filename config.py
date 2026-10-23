@@ -359,3 +359,35 @@ HS_ACTIVE_DEAL_STAGE_PROP = os.environ.get("HS_ACTIVE_DEAL_STAGE_PROP", "dealsta
 HS_ACTIVE_DEAL_STAGES = tuple(s for s in os.environ.get(
     "HS_ACTIVE_DEAL_STAGES",
     "qualifiedtobuy,1523817,11586560,1492994,1492995").split(",") if s)
+
+# ===========================================================================
+# Sync repair service  (ops-triggered heal of missed / damaged orders & SRs)
+# ===========================================================================
+# An Airtable form writes a "Sync Repair Requests" row; an Airtable automation POSTs
+# it to this Cloud Run HTTP service (repair_service.py). The service diagnoses why the
+# order/SR was missed, heals it through the normal sync mapping, and writes the result
+# back onto the row + an Airtable comment + Slack. All field IDs are env-overridable so
+# the table can be created in the Airtable UI and wired without code changes. See
+# REPAIR_SETUP.md. With REPAIR_REQUESTS_TABLE unset the writeback no-ops safely.
+REPAIR_REQUESTS_TABLE = os.environ.get("REPAIR_REQUESTS_TABLE", "")   # tbl... of the requests table
+# Shared secret the Airtable automation sends as the X-Repair-Secret header; the service
+# rejects any request without it. Keep it in Secret Manager, never in the repo.
+REPAIR_WEBHOOK_SECRET = os.environ.get("REPAIR_WEBHOOK_SECRET", "")
+# Form / request fields (ops fill the first few; the service owns the rest).
+RF_PIPE17_ID = os.environ.get("RF_PIPE17_ID", "")        # singleLineText — order/SR number
+RF_TYPE = os.environ.get("RF_TYPE", "")                  # singleSelect  — Order / Shipping Request / Auto
+RF_FORCE = os.environ.get("RF_FORCE", "")                # checkbox      — heal even if not normally synced
+RF_DETAILS = os.environ.get("RF_DETAILS", "")            # multilineText — what's wrong (ops notes)
+RF_STATUS = os.environ.get("RF_STATUS", "")              # singleSelect  — service-owned
+RF_DIAGNOSIS = os.environ.get("RF_DIAGNOSIS", "")        # multilineText — service writes why
+RF_OUTCOME = os.environ.get("RF_OUTCOME", "")            # multilineText — service writes what it did
+RF_PROCESSED_AT = os.environ.get("RF_PROCESSED_AT", "")  # dateTime      — service writes
+# Status option strings the service writes (must exist on the RF_STATUS single-select).
+REPAIR_STATUS_PROCESSING = os.environ.get("REPAIR_STATUS_PROCESSING", "Processing")
+REPAIR_STATUS_HEALED = os.environ.get("REPAIR_STATUS_HEALED", "Healed")
+REPAIR_STATUS_NOT_HEALED = os.environ.get("REPAIR_STATUS_NOT_HEALED", "Could Not Heal")
+REPAIR_STATUS_REVIEW = os.environ.get("REPAIR_STATUS_REVIEW", "Needs Review")
+# Request Type option strings (what ops pick on the form).
+REPAIR_TYPE_ORDER = os.environ.get("REPAIR_TYPE_ORDER", "Order")
+REPAIR_TYPE_SR = os.environ.get("REPAIR_TYPE_SR", "Shipping Request")
+REPAIR_TYPE_AUTO = os.environ.get("REPAIR_TYPE_AUTO", "Auto")

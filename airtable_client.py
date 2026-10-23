@@ -16,6 +16,20 @@ def find_record_id(table, field_name, value):
     return recs[0]["id"] if recs else None
 
 
+def create_comment(table, record_id, text):
+    """Post a comment on a record (the repair service's ops-facing 'thread'). Best-effort:
+    returns True on success, False on failure — a comment must never fail the repair."""
+    if not (table and record_id and text):
+        return False
+    url = f"{BASE}/{table}/{record_id}/comments"
+    try:
+        resp = requests.post(url, headers=HEADERS, json={"text": text}, timeout=30)
+        resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 def find_record(table, field_name, value):
     """Return the full record (fields keyed by field ID) where field_name==value, or None."""
     url = f"{BASE}/{table}"
