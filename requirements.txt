@@ -1,3 +1,5 @@
 requests>=2.31,<3
 pdfkit>=1.0,<2
 google-cloud-storage>=2.10,<4
+flask>=3.0,<4
+gunicorn>=21,<24
