@@ -14,6 +14,7 @@ from config import (
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_TAX_TOTAL_PROP,
     ORDER_ROUTING_TAGS, ORDER_B2B_TAG, SHIPPING_TAG_MAP,
     PIPE17_HOLD_NOTE_FIELD,
+    SO_RETAIL_PRICING, PIPE17_ORDER_DISCOUNT_FIELD,
 )
 from pipe17_catalog import get_resolver
 
@@ -73,6 +74,32 @@ def _net_unit_price(li):
     return _num(li.get("price"))
 
 
+def _retail_unit_price(li):
+    """Full retail unit price = HubSpot line `price` (pre-discount unit). Falls back to
+    the net unit price when no list price is set, so a line without a catalog price just
+    behaves as before (no phantom discount)."""
+    price = _num(li.get("price"))
+    return price if price is not None else _net_unit_price(li)
+
+
+def _retail_line_total(li):
+    """Pre-discount line total = retail unit * qty (falls back to net)."""
+    qty = _num(li.get("quantity")) or 0
+    price = _num(li.get("price"))
+    if price is not None:
+        return round(price * qty, 2)
+    return _net_line_total(li)
+
+
+def _net_line_total(li):
+    """Net (post-discount) line total = HubSpot `amount`, else price * qty."""
+    amount = _num(li.get("amount"))
+    if amount is not None:
+        return amount
+    qty = _num(li.get("quantity")) or 0
+    return round((_num(li.get("price")) or 0) * qty, 2)
+
+
 def shipping_tags(line_items):
     """Order-level routing tags from the deal's shipping service lines: each named
     shipping line (White Glove, Free Shipping, Expedited Shipping) adds a same-named
@@ -107,9 +134,10 @@ def _line_items(items, resolver):
             "uniqueId": f"line-{idx}",
             "requiresShipping": base_sku not in SERVICE_SKUS,
         }
-        net = _net_unit_price(li)
-        if net is not None:
-            entry["itemPrice"] = net
+        # Retail mode carries the full list unit price; otherwise the net unit price.
+        unit = _retail_unit_price(li) if SO_RETAIL_PRICING else _net_unit_price(li)
+        if unit is not None:
+            entry["itemPrice"] = unit
         out.append(entry)
     return out
 
@@ -173,15 +201,27 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix="", *,
         if customer:
             body["customer"] = customer
 
-    # Payment: subtotal = sum of the line items' net totals (itemPrice * qty). The deal
-    # "Amount" field is deliberately ignored — it's a manual field that's often blank; the
-    # line items are the source of truth (matches HubSpot's TCV / Subtotal). Tax deferred
-    # (Shopify via Alex) — total = subtotal + tax.
-    subtotal = round(sum((li.get("itemPrice") or 0) * (li.get("quantity") or 0)
-                         for li in body["lineItems"]), 2)
+    # Payment. The deal "Amount" field is deliberately ignored — it's a manual field
+    # that's often blank; the line items are the source of truth (matches HubSpot's
+    # TCV / Subtotal). Tax deferred (Shopify via Alex) — total = subtotal + tax.
     tax = _num(props.get(HS_TAX_TOTAL_PROP))
-    body["subTotalPrice"] = subtotal
-    body["totalPrice"] = round(subtotal + (tax or 0), 2)
+    if SO_RETAIL_PRICING:
+        # Finance view: full retail subtotal, one order-level discount on the bottom. The
+        # net total owed (and thus totalPrice) is identical to net mode, so reconciliation
+        # is unaffected — only subTotalPrice becomes retail and the discount is surfaced.
+        retail_subtotal = round(sum(_retail_line_total(li) for li in (line_items or [])), 2)
+        net_subtotal = round(sum(_net_line_total(li) for li in (line_items or [])), 2)
+        total_discount = round(retail_subtotal - net_subtotal, 2)
+        body["subTotalPrice"] = retail_subtotal
+        if total_discount:
+            body[PIPE17_ORDER_DISCOUNT_FIELD] = total_discount
+        body["totalPrice"] = round(net_subtotal + (tax or 0), 2)
+    else:
+        # Net mode (unchanged): subtotal = sum of the line items' net totals (itemPrice * qty).
+        subtotal = round(sum((li.get("itemPrice") or 0) * (li.get("quantity") or 0)
+                             for li in body["lineItems"]), 2)
+        body["subTotalPrice"] = subtotal
+        body["totalPrice"] = round(subtotal + (tax or 0), 2)
     if tax is not None:
         body["orderTax"] = tax
 
