@@ -451,3 +451,15 @@ HOLD_RFO_SLACK_ALERT = os.environ.get("HOLD_RFO_SLACK_ALERT", "true").lower() ==
 # — Pipe17 v3 has no dedicated cancel endpoint; status is a settable field on PUT.
 PIPE17_ORDER_UPDATE_PATH = os.environ.get("PIPE17_ORDER_UPDATE_PATH", "/orders/{id}")
 PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
+
+# ===========================================================================
+# SO finance fields (Finance / Drew 10/27): carry FULL RETAIL unit prices at the
+# line-item level plus a single order-level discount "on the bottom", instead of
+# net unit prices. Retail unit = HubSpot line `price`; discount = (price*qty) - net
+# `amount`, summed across lines. The order total owed is unchanged (net + tax), so
+# reconciliation is unaffected; only subTotalPrice becomes retail and the discount is
+# surfaced. Gated OFF by default — when off, Track B sends net itemPrice exactly as
+# before. Dry-run and verify one order (confirm PIPE17_ORDER_DISCOUNT_FIELD is the
+# field Pipe17 actually reads) before enabling.
+SO_RETAIL_PRICING = os.environ.get("SO_RETAIL_PRICING", "false").lower() == "true"
+PIPE17_ORDER_DISCOUNT_FIELD = os.environ.get("PIPE17_ORDER_DISCOUNT_FIELD", "discount")
