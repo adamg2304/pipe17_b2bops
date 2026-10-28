@@ -56,8 +56,9 @@ workflow). Going live:
 2. **Dry-run** against live data (writes nothing): `python hold_sync.py --deal-id <id>`
    then a full `python hold_sync.py`. Confirm the per-deal decisions.
 3. **First live write is a single deal:** `DRY_RUN=false python hold_sync.py --deal-id <id>`.
-   Confirm the Pipe17 order carries the note field (`PIPE17_HOLD_NOTE_FIELD`, default
-   `notes`). If Pipe17 rejects it, set `PIPE17_HOLD_NOTE=""` (tag still marks the hold).
+   Confirm the Pipe17 order carries the note (`PIPE17_HOLD_NOTE_FIELD`, default
+   `orderNote` — verified against Pipe17's order schema). If it ever rejects it, set
+   `PIPE17_HOLD_NOTE=""` (the tag and the `inventory_hold` custom field still mark it).
 4. **Flip the flag:** set `INVENTORY_HOLD_ENABLED=true` in the Track B deploy step and
    push (durable across redeploys), or set it on `hubspot-pipe17-orders` directly.
 

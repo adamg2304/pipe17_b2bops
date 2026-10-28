@@ -244,16 +244,16 @@ check("withdrawn, no order -> noop", res == "noop")
 # ---------------------------------------------------------------------------
 print("4) SO retail pricing + order-level discount (gated SO_RETAIL_PRICING)")
 transform_order.SO_RETAIL_PRICING = True
-transform_order.PIPE17_ORDER_DISCOUNT_FIELD = "discount"
+transform_order.PIPE17_ORDER_DISCOUNT_FIELD = "orderDiscount"
 rbody, _, _ = build_order(DEAL_USD, LINE_ITEMS, CONTACT)
 rchair = next(li for li in rbody["lineItems"] if li["sku"] == "11-03-00-50")
 check("retail mode itemPrice = list unit price (250, not net 233.1)", rchair["itemPrice"] == 250)
 check("retail subtotal = sum(price*qty) (250*25 + 1171.25 = 7421.25)", rbody["subTotalPrice"] == 7421.25)
-check("order discount = retail - net (7421.25 - 6998.75 = 422.5)", rbody["discount"] == 422.5)
+check("orderDiscount = retail - net (7421.25 - 6998.75 = 422.5)", rbody["orderDiscount"] == 422.5)
 check("retail total unchanged = net + tax (6998.75)", rbody["totalPrice"] == 6998.75)
 # A line with no discount (amount == price*qty) adds no discount field.
 nodisc, _, _ = build_order(DEAL_USD, [CHAIR], None)
-check("no discount -> no discount field on order", "discount" not in nodisc)
+check("no discount -> no orderDiscount field on order", "orderDiscount" not in nodisc)
 transform_order.SO_RETAIL_PRICING = False   # reset the module flag after the gated test
 
 print(f"\n{passed} passed, {failed} failed")

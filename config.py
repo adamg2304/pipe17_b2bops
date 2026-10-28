@@ -430,7 +430,7 @@ PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConf
 # --deal-id test). Set PIPE17_HOLD_NOTE or PIPE17_HOLD_NOTE_FIELD to "" to skip it.
 PIPE17_HOLD_NOTE = os.environ.get(
     "PIPE17_HOLD_NOTE", "INVENTORY HOLD — DO NOT RELEASE until deal reaches Ready for Ops")
-PIPE17_HOLD_NOTE_FIELD = os.environ.get("PIPE17_HOLD_NOTE_FIELD", "notes")
+PIPE17_HOLD_NOTE_FIELD = os.environ.get("PIPE17_HOLD_NOTE_FIELD", "orderNote")
 # The note is CLEARED on the Ready-for-Ops flip (held -> confirmed), when the order
 # also picks up the Airtable tag — so a released order never carries "DO NOT RELEASE".
 
@@ -462,4 +462,4 @@ PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
 # before. Dry-run and verify one order (confirm PIPE17_ORDER_DISCOUNT_FIELD is the
 # field Pipe17 actually reads) before enabling.
 SO_RETAIL_PRICING = os.environ.get("SO_RETAIL_PRICING", "false").lower() == "true"
-PIPE17_ORDER_DISCOUNT_FIELD = os.environ.get("PIPE17_ORDER_DISCOUNT_FIELD", "discount")
+PIPE17_ORDER_DISCOUNT_FIELD = os.environ.get("PIPE17_ORDER_DISCOUNT_FIELD", "orderDiscount")
