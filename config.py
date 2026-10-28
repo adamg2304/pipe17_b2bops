@@ -391,3 +391,63 @@ REPAIR_STATUS_REVIEW = os.environ.get("REPAIR_STATUS_REVIEW", "Needs Review")
 REPAIR_TYPE_ORDER = os.environ.get("REPAIR_TYPE_ORDER", "Order")
 REPAIR_TYPE_SR = os.environ.get("REPAIR_TYPE_SR", "Shipping Request")
 REPAIR_TYPE_AUTO = os.environ.get("REPAIR_TYPE_AUTO", "Auto")
+
+# ===========================================================================
+# Inventory hold (V2) — Track B second trigger: lock inventory for a deal before
+# it's paid, on the SAME Pipe17 order the Ready-for-Ops flow later releases.
+# Build-only / dry-run testable. Gated OFF by default; when disabled, Track B
+# behaves exactly as before (this whole path is skipped).
+# ===========================================================================
+INVENTORY_HOLD_ENABLED = os.environ.get("INVENTORY_HOLD_ENABLED", "false").lower() == "true"
+
+# HubSpot deal signals.
+HS_INVENTORY_HOLD_PROP = os.environ.get("HS_INVENTORY_HOLD_PROP", "inventory_hold_approved")  # bool
+HS_DEAL_STAGE_PROP = os.environ.get("HS_DEAL_STAGE_PROP", "dealstage")
+# Post-quote, pre-Ready-for-Ops stages where a hold can be placed (Quote Sent,
+# Buyer Engaged, Committed Deal, Deposit Invoice Sent). Env override is comma-sep.
+# Same active sales stages the line-item inventory fan-out uses (minus qualifiedtobuy).
+HS_HOLD_STAGE_IDS = tuple(s for s in os.environ.get(
+    "HS_HOLD_STAGE_IDS", "1523817,11586560,1492994,1492995").split(",") if s)
+HS_READY_FOR_OPS_STAGE_ID = os.environ.get("HS_READY_FOR_OPS_STAGE_ID", HS_DEPOSIT_PAID_STAGE_ID)  # 10492961
+HS_LOST_STAGE_ID = os.environ.get("HS_LOST_STAGE_ID", "closedlost")  # stage supersedes the checkbox
+
+# Every order (hold or confirmed) is created at Ready-for-Fulfillment so inventory
+# commits and shipping requests are generated; an Ops tag-automation parks the SRs
+# in Review Required until released. Distinguished by tag:
+#   held  -> B2BInventoryHold, NOT Airtable (Track A ignores unpaid holds)
+#   confirmed/released -> B2BConfirmReview + Airtable (Ops reviews, then releases)
+# The two review tags each need a matching Pipe17 order-automation (Ops/Harry own
+# those). Names are env-overridable so they match whatever the automations key on.
+PIPE17_RFF_STATUS = os.environ.get("PIPE17_RFF_STATUS", "readyForFulfillment")
+PIPE17_HOLD_TAG = os.environ.get("PIPE17_HOLD_TAG", "B2BInventoryHold")
+PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConfirmReview")
+
+# Visible "do not release" note written onto a held Pipe17 order, on top of the tag
+# (Drew/Adam 10/27: a caps note so anyone opening the order sees it is not an active
+# order). Only set on HOLD creates; the confirmed/released transition leaves notes
+# alone so Ops edits survive. PIPE17_HOLD_NOTE_FIELD is the order field it writes to —
+# confirm Pipe17 accepts it before go-live (the first live hold should be a single
+# --deal-id test). Set PIPE17_HOLD_NOTE or PIPE17_HOLD_NOTE_FIELD to "" to skip it.
+PIPE17_HOLD_NOTE = os.environ.get(
+    "PIPE17_HOLD_NOTE", "INVENTORY HOLD — DO NOT RELEASE until deal reaches Ready for Ops")
+PIPE17_HOLD_NOTE_FIELD = os.environ.get("PIPE17_HOLD_NOTE_FIELD", "notes")
+# The note is CLEARED on the Ready-for-Ops flip (held -> confirmed), when the order
+# also picks up the Airtable tag — so a released order never carries "DO NOT RELEASE".
+
+# Reportable hold flag as a custom field on the SO, in addition to the tag (Gina:
+# surface the hold as a custom field so it's reportable in Pipe17). Set at create and
+# on the released transition. Empty name disables it.
+PIPE17_HOLD_CF_NAME = os.environ.get("PIPE17_HOLD_CF_NAME", "inventory_hold")
+PIPE17_HOLD_CF_HELD = os.environ.get("PIPE17_HOLD_CF_HELD", "true")
+PIPE17_HOLD_CF_RELEASED = os.environ.get("PIPE17_HOLD_CF_RELEASED", "false")
+
+# Slack alert to Sales Ops when a held order flips to Ready for Ops (held -> confirmed),
+# so they know to review and release its shipping requests.
+HOLD_RFO_SLACK_ALERT = os.environ.get("HOLD_RFO_SLACK_ALERT", "true").lower() == "true"
+
+# REST path for order update (Track B write path). Template takes {id}.
+# Pipe17 v3 updates an order with PUT /api/v3/orders/{orderId} (the method is in
+# pipe17_write). Cancellation uses the SAME PUT, setting status=PIPE17_CANCELED_STATUS
+# — Pipe17 v3 has no dedicated cancel endpoint; status is a settable field on PUT.
+PIPE17_ORDER_UPDATE_PATH = os.environ.get("PIPE17_ORDER_UPDATE_PATH", "/orders/{id}")
+PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
