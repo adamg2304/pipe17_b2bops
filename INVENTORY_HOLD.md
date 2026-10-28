@@ -11,20 +11,26 @@ To lock inventory, a Pipe17 order must reach **`readyForFulfillment`** — that'
 splits shipping requests and commits inventory. A `draft` order does not hold anything.
 So every order (hold or confirmed) is created at `readyForFulfillment`, and an **Ops
 tag-keyed Pipe17 automation parks the shipping requests in Review Required** so nothing
-ships until released. Our code only sets the status, the tags, and (on a hold) a note.
+ships until released. Our code only sets the status, the tags, a hold note + reportable
+custom field, and a Sales-Ops Slack alert when a hold flips to Ready for Ops.
 
 ## States
 
 | Deal condition | Pipe17 order | Tags | Note |
 |---|---|---|---|
-| **Hold** — hold stage + `inventory_hold_approved` checkbox | `readyForFulfillment` | `B2BInventoryHold` + routing/B2B, **no** `Airtable` | `DO NOT RELEASE` |
+| **Hold** — hold stage + `inventory_hold_approved` checkbox | `readyForFulfillment` | `B2BInventoryHold` + routing/B2B, **no** `Airtable` | `DO NOT RELEASE` added |
 | **Confirmed** — stage = Ready for Ops (`10492961`) | `readyForFulfillment` | `Airtable` + `B2BConfirmReview` + routing/B2B | none |
-| **Held → Ready for Ops** | unchanged | remove `B2BInventoryHold`, add `Airtable` + `B2BConfirmReview`; re-sync lines | left alone |
+| **Held → Ready for Ops** | unchanged | remove `B2BInventoryHold`, add `Airtable` + `B2BConfirmReview`; re-sync lines | **cleared** |
 | **Withdrawn** — closed-lost, or checkbox cleared in a hold stage | cancelled | — | — |
 
 - Holds are **not** tagged `Airtable`, so Track A / Ops never see or action them. Only
   at Ready for Ops does the order get `Airtable` + `B2BConfirmReview`, surfacing it for
   Ops to review against HubSpot and release the SRs.
+- On the **Held → Ready for Ops** flip, the `DO NOT RELEASE` note is **cleared** (a
+  released order never carries it), and a **Slack alert goes to Sales Ops** ("Held order
+  XYZ is now Ready for Ops — review and release its shipping requests").
+- The hold is also surfaced as a **reportable custom field** on the SO
+  (`inventory_hold` = `true` while held, `false` once released), in addition to the tag.
 - **Cancel only touches a still-held order** (one still carrying `B2BInventoryHold`). A
   released order is never cancelled by a later loss — its 3PL shipment isn't recalled by
   a status flip.

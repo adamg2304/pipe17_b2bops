@@ -84,7 +84,15 @@ print("3) inventory hold V2 (offline; Pipe17/HubSpot stubbed)")
 import hold_sync
 from config import (PIPE17_HOLD_TAG, PIPE17_CONFIRM_REVIEW_TAG, PIPE17_AIRTABLE_TAG,
                     PIPE17_RFF_STATUS, HS_HOLD_STAGE_IDS, HS_READY_FOR_OPS_STAGE_ID,
-                    HS_LOST_STAGE_ID, PIPE17_HOLD_NOTE, PIPE17_HOLD_NOTE_FIELD)
+                    HS_LOST_STAGE_ID, PIPE17_HOLD_NOTE, PIPE17_HOLD_NOTE_FIELD,
+                    PIPE17_HOLD_CF_NAME, PIPE17_HOLD_CF_HELD, PIPE17_HOLD_CF_RELEASED)
+
+# Capture the Ready-for-Ops Slack alert without posting.
+_slack = []
+hold_sync.notify = type("N", (), {"slack": staticmethod(lambda *a, **k: _slack.append(a[0] if a else ""))})()
+
+def _cf(body, name):
+    return next((c["value"] for c in (body.get("customFields") or []) if c["name"] == name), None)
 
 HOLD_STAGE = HS_HOLD_STAGE_IDS[0]            # e.g. 1523817 Quote Sent
 HOLD_LINES = [{"sku": "11-03-00-50", "name": "Chair", "quantity": 2, "price": 250, "amount": 500},
@@ -151,38 +159,58 @@ check("hold order tags carry B2BInventoryHold, not Airtable",
       PIPE17_HOLD_TAG in p17.created[0]["tags"] and PIPE17_AIRTABLE_TAG not in p17.created[0]["tags"])
 check("hold create carries DO-NOT-RELEASE note",
       not PIPE17_HOLD_NOTE or p17.created[0].get(PIPE17_HOLD_NOTE_FIELD) == PIPE17_HOLD_NOTE)
+check("hold create carries reportable inventory_hold=true custom field",
+      not PIPE17_HOLD_CF_NAME or _cf(p17.created[0], PIPE17_HOLD_CF_NAME) == PIPE17_HOLD_CF_HELD)
+check("hold create keeps hubspot_deal_id custom field",
+      _cf(p17.created[0], "hubspot_deal_id") == "900001")
 check("hold create writes pipe17_order_id back", hsf.set_calls == [("900001", "OID123")])
 res, *_ = reconcile(deal_with(HOLD_STAGE, True), dry_run=True)
 check("hold create DRY_RUN -> would_create (no write)", res == "would_create")
 
-# CONFIRMED create carries NO hold note
+# CONFIRMED create: no hold note, and inventory_hold=false
 res, _, _, p17 = reconcile(deal_with(HS_READY_FOR_OPS_STAGE_ID, False))
 check("confirmed create -> no hold note",
       PIPE17_HOLD_NOTE_FIELD not in p17.created[0] or not PIPE17_HOLD_NOTE)
+check("confirmed create -> inventory_hold=false custom field",
+      not PIPE17_HOLD_CF_NAME or _cf(p17.created[0], PIPE17_HOLD_CF_NAME) == PIPE17_HOLD_CF_RELEASED)
 
 # UNCHANGED: existing order already matches the desired hold shape (already at RFF)
 EXISTING_HOLD = {"orderId": "O1",
                  "status": PIPE17_RFF_STATUS,
                  "lineItems": [{"sku": "11-03-00-50", "quantity": 2, "itemPrice": 250},
                                {"sku": "White Glove Delivery", "quantity": 1, "itemPrice": 100}],
-                 "tags": ["White Glove", "B2B", PIPE17_HOLD_TAG]}
+                 "tags": ["White Glove", "B2B", PIPE17_HOLD_TAG],
+                 PIPE17_HOLD_NOTE_FIELD: PIPE17_HOLD_NOTE}
 res, _, _, p17 = reconcile(deal_with(HOLD_STAGE, True), existing=EXISTING_HOLD)
-check("hold unchanged when lines+tags match", res == "unchanged" and not p17.updated)
+check("hold unchanged when lines+tags+note match", res == "unchanged" and not p17.updated)
 
 # UPDATE: deal line items changed (qty differs)
 CHANGED = dict(EXISTING_HOLD, lineItems=[{"sku": "11-03-00-50", "quantity": 1, "itemPrice": 250}])
 res, _, _, p17 = reconcile(deal_with(HOLD_STAGE, True), existing=CHANGED)
 check("hold update on signature change -> updated", res == "updated" and len(p17.updated) == 1)
 
-# CONFIRMED transition: held order moves to Ready for Ops -> tag swap (lines same)
+# CONFIRMED transition: held order moves to Ready for Ops -> tag swap, note cleared,
+# inventory_hold->false, and a Sales-Ops Slack alert fires.
+_slack.clear()
 res, _, _, p17 = reconcile(deal_with(HS_READY_FOR_OPS_STAGE_ID, False), existing=EXISTING_HOLD)
 check("held -> Ready for Ops = tag swap update", res == "updated")
 _, upd_body = p17.updated[0]
 check("confirmed swap: Airtable + B2BConfirmReview in, B2BInventoryHold out",
       PIPE17_AIRTABLE_TAG in upd_body["tags"] and PIPE17_CONFIRM_REVIEW_TAG in upd_body["tags"]
       and PIPE17_HOLD_TAG not in upd_body["tags"])
-check("confirmed update does not re-stamp the hold note",
-      PIPE17_HOLD_NOTE_FIELD not in upd_body)
+check("confirmed clears the DO-NOT-RELEASE note",
+      not PIPE17_HOLD_NOTE or upd_body.get(PIPE17_HOLD_NOTE_FIELD) == "")
+check("confirmed sets inventory_hold=false custom field",
+      not PIPE17_HOLD_CF_NAME or _cf(upd_body, PIPE17_HOLD_CF_NAME) == PIPE17_HOLD_CF_RELEASED)
+check("held -> Ready for Ops fires a Sales-Ops Slack alert",
+      len(_slack) == 1 and "Ready for Ops" in _slack[0])
+
+# A deal already at Ready for Ops (never held) does NOT alert
+_slack.clear()
+NEVER_HELD = {"orderId": "O9", "status": PIPE17_RFF_STATUS, "lineItems": EXISTING_HOLD["lineItems"],
+              "tags": [PIPE17_AIRTABLE_TAG, "White Glove", "B2B", PIPE17_CONFIRM_REVIEW_TAG]}
+res, _, _, p17 = reconcile(deal_with(HS_READY_FOR_OPS_STAGE_ID, False), existing=dict(NEVER_HELD, lineItems=[{"sku": "X", "quantity": 1, "itemPrice": 5}]))
+check("confirmed non-hold update does not alert", not _slack)
 
 # TAG PRESERVATION (regression): a non-managed freight tag (LTL) and any Ops-added tag
 # must survive a confirmed update — only our managed tags get flipped.

@@ -30,12 +30,15 @@ import logging
 import os
 
 import transform_order
+import notify
 from transform_order import build_order, currency_of, ext_order_id_of
 from config import (
     HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP,
     HS_HOLD_STAGE_IDS, HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID,
     PIPE17_RFF_STATUS, PIPE17_HOLD_TAG, PIPE17_CONFIRM_REVIEW_TAG, PIPE17_AIRTABLE_TAG,
-    PIPE17_HOLD_NOTE,
+    PIPE17_HOLD_NOTE, PIPE17_HOLD_NOTE_FIELD,
+    PIPE17_HOLD_CF_NAME, PIPE17_HOLD_CF_HELD, PIPE17_HOLD_CF_RELEASED,
+    HOLD_RFO_SLACK_ALERT,
 )
 
 log = logging.getLogger("hubspot-pipe17")
@@ -129,6 +132,14 @@ def tags_differ(existing, desired):
     return set(existing or []) != set(desired or [])
 
 
+def _set_cf(custom_fields, name, value):
+    """Upsert one {name,value} into a Pipe17 customFields list, preserving the rest
+    (notably hubspot_deal_id). Returns a new list."""
+    out = [dict(c) for c in (custom_fields or []) if c.get("name") != name]
+    out.append({"name": name, "value": value})
+    return out
+
+
 # --- reconcile one deal (Pipe17/HubSpot injected for testability) ----------
 
 def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
@@ -154,10 +165,16 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
         contact = hs.delivery_contact_of(deal_id)
         tags = desired_tags(action, transform_order.shipping_tags(line_items))
         # The "DO NOT RELEASE" note is only stamped on a hold create; a confirmed
-        # (released) order carries no new note so Ops edits survive.
+        # (released) order carries no new note.
         note = PIPE17_HOLD_NOTE if action == "hold" else None
         body, _, _ = build_order(deal, line_items, contact, order_suffix,
                                  status=PIPE17_RFF_STATUS, tags=tags, note=note)
+        # Reportable hold flag as a custom field (held on a hold, released otherwise),
+        # alongside hubspot_deal_id which build_order already set.
+        cf_value = PIPE17_HOLD_CF_HELD if action == "hold" else PIPE17_HOLD_CF_RELEASED
+        if PIPE17_HOLD_CF_NAME:
+            body["customFields"] = _set_cf(body.get("customFields"), PIPE17_HOLD_CF_NAME, cf_value)
+
         if not existing:
             if dry_run:
                 log.info("[DRY_RUN] %s: would CREATE %s (%s), tags=%s, %d items",
@@ -169,6 +186,7 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
             return "created", ext
 
         oid = p17w.order_id_of(existing) or ext
+        was_held = PIPE17_HOLD_TAG in (existing.get("tags") or [])
         # Preserve the existing order's non-managed tags (LTL, Ops/automation tags);
         # only flip our own state tags. Never rebuild the tag list from scratch.
         desired = merge_tags(existing.get("tags"), action)
@@ -177,25 +195,42 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
         same_lines = sig_existing == sig_body
         same_tags = not tags_differ(existing.get("tags"), desired)
         same_status = str(existing.get("status") or "") == PIPE17_RFF_STATUS
+        # On the Ready-for-Ops flip (confirmed), clear our "DO NOT RELEASE" note so a
+        # released order never carries it. Only touch it when it's actually present.
+        existing_note = existing.get(PIPE17_HOLD_NOTE_FIELD) or ""
+        if action == "confirmed" and PIPE17_HOLD_NOTE and PIPE17_HOLD_NOTE in existing_note:
+            new_note = existing_note.replace(PIPE17_HOLD_NOTE, "").strip()
+            note_change = True
+        else:
+            new_note, note_change = existing_note, False
         if not same_lines and _DEBUG:
             log.info("[DEBUG] %s line mismatch:\n  existing=%s\n  body    =%s",
                      ext, sig_existing, sig_body)
         if not same_tags and _DEBUG:
             log.info("[DEBUG] %s tag change: existing=%s desired=%s",
                      ext, existing.get("tags"), desired)
-        if same_lines and same_tags and same_status:
+        if same_lines and same_tags and same_status and not note_change:
             return "unchanged", ext
         if dry_run:
-            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s status_changed=%s)",
-                     action, ext, not same_lines, not same_tags, not same_status)
+            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s status_changed=%s note_cleared=%s)",
+                     action, ext, not same_lines, not same_tags, not same_status, note_change)
             return "would_update", ext
-        # Minimal PUT: only the fields we own. Leave shippingAddress / customer / notes
-        # alone so Ops edits survive. lineItems only when they actually changed.
+        # Minimal PUT: only the fields we own. Leave shippingAddress / customer alone so
+        # Ops edits survive. lineItems only when changed; note only cleared on release.
         update_body = {"status": PIPE17_RFF_STATUS, "tags": desired}
         if not same_lines:
             update_body["lineItems"] = body.get("lineItems")
+        if PIPE17_HOLD_CF_NAME:
+            update_body["customFields"] = body.get("customFields")
+        if note_change:
+            update_body[PIPE17_HOLD_NOTE_FIELD] = new_note   # "" clears the note
         p17w.update_order(oid, update_body, api_key)
         hs.set_pipe17_order_id(deal_id, str(oid))
+        # Sales-Ops alert on the held -> Ready for Ops flip (an order that WAS a hold and
+        # is now confirmed), so they review and release its shipping requests.
+        if action == "confirmed" and was_held and HOLD_RFO_SLACK_ALERT:
+            notify.slack(f":inbox_tray: Held order *{ext}* (deal {deal_id}) is now "
+                         f"*Ready for Ops* — review and release its shipping requests.")
         log.info("%s: updated Pipe17 order %s for deal %s", action, ext, deal_id)
         return "updated", ext
 

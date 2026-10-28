@@ -431,6 +431,19 @@ PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConf
 PIPE17_HOLD_NOTE = os.environ.get(
     "PIPE17_HOLD_NOTE", "INVENTORY HOLD — DO NOT RELEASE until deal reaches Ready for Ops")
 PIPE17_HOLD_NOTE_FIELD = os.environ.get("PIPE17_HOLD_NOTE_FIELD", "notes")
+# The note is CLEARED on the Ready-for-Ops flip (held -> confirmed), when the order
+# also picks up the Airtable tag — so a released order never carries "DO NOT RELEASE".
+
+# Reportable hold flag as a custom field on the SO, in addition to the tag (Gina:
+# surface the hold as a custom field so it's reportable in Pipe17). Set at create and
+# on the released transition. Empty name disables it.
+PIPE17_HOLD_CF_NAME = os.environ.get("PIPE17_HOLD_CF_NAME", "inventory_hold")
+PIPE17_HOLD_CF_HELD = os.environ.get("PIPE17_HOLD_CF_HELD", "true")
+PIPE17_HOLD_CF_RELEASED = os.environ.get("PIPE17_HOLD_CF_RELEASED", "false")
+
+# Slack alert to Sales Ops when a held order flips to Ready for Ops (held -> confirmed),
+# so they know to review and release its shipping requests.
+HOLD_RFO_SLACK_ALERT = os.environ.get("HOLD_RFO_SLACK_ALERT", "true").lower() == "true"
 
 # REST path for order update (Track B write path). Template takes {id}.
 # Pipe17 v3 updates an order with PUT /api/v3/orders/{orderId} (the method is in
