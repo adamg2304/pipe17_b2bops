@@ -1,13 +1,15 @@
 # Auto-deploy from GitHub (Cloud Run Jobs)
 
-Pushing to `main` now redeploys all three Cloud Run Jobs automatically via
+Pushing to `main` now redeploys the Cloud Run Jobs automatically via
 `.github/workflows/deploy-cloud-run.yml`. No more manual `gcloud` from Cloud Shell.
 
-- Track A `pipe17-airtable-sync`, Track B `hubspot-pipe17-orders`, and the inventory
-  sync `pipe17-hubspot-inventory` all redeploy on any push to `main` that touches
-  `*.py`, `Dockerfile`, `requirements.txt`, `assets/**`, or the workflow itself.
+- Track A `pipe17-airtable-sync`, Track B `hubspot-pipe17-orders`, the inventory sync
+  `pipe17-hubspot-inventory`, the reconcile sweep `pipe17-airtable-sync-reconcile`, and the
+  parcel-tracking job `pipe17-parcel-tracking` all redeploy on any push to `main` that
+  touches `*.py`, `Dockerfile`, `requirements.txt`, `assets/**`, or the workflow itself.
 - You can also deploy on demand: repo → **Actions** → **Deploy Cloud Run Jobs** →
-  **Run workflow**, and pick `both`, `track-a`, `track-b`, or `inventory`.
+  **Run workflow**, and pick `both`, `track-a`, `track-b`, `inventory`, `reconcile`,
+  `parcel-tracking`, or `repair`.
 - The env vars and `--set-secrets` in the workflow ARE the canonical job config
   (from the handoff §7). Each deploy replaces the job's env/secrets with exactly
   those values, so change config by editing the workflow, not the job in the console
@@ -106,7 +108,7 @@ Touches no deals, orders, or the order/shipment sync.
   Channel-SKU alias is NOT used here (it only governs which version an order draws).
   `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
 
-### Scheduler (every 20 min)
+### Scheduler (hourly)
 
 The two existing jobs are driven by Cloud Scheduler entries that call the Cloud Run
 Jobs run API with an OIDC token from the invoker SA. Add one for the inventory job
@@ -122,7 +124,7 @@ INVOKER_SA=$(gcloud scheduler jobs describe pipe17-airtable-sync-schedule \
 
 gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
   --project "$PROJECT_ID" --location "$REGION" \
-  --schedule="*/20 * * * *" --time-zone="Etc/UTC" \
+  --schedule="0 * * * *" --time-zone="Etc/UTC" \
   --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_NUM/jobs/pipe17-hubspot-inventory:run" \
   --http-method=POST \
   --oauth-service-account-email="$INVOKER_SA" \
@@ -130,7 +132,63 @@ gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
 ```
 
 (If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
-the same invoker SA and a `*/20 * * * *` cadence.)
+the same invoker SA and a `0 * * * *` cadence.)
+
+If the scheduler already exists on the old 20-min cadence, just update it in place:
+
+```bash
+gcloud scheduler jobs update http pipe17-hubspot-inventory-schedule \
+  --project pipe17-b2bops --location europe-west1 --schedule="0 * * * *"
+```
+
+## Parcel tracking job (pipe17-parcel-tracking)
+
+Reads Pipe17 **fulfillments** and, for shipments that shipped via **parcel** (carrier in
+`PARCEL_CARRIERS`) and were picked up by Pipe17 directly, advances the Airtable shipment
+**Status → In-Transit** (forward-only) and writes the **parcel tracking number(s)**. This
+restores the Skubana behavior: a parcel shipment flips to In-Transit with tracking as soon
+as the carrier label exists, instead of sitting at "Processing". Reads Pipe17, writes only
+the Airtable Shipments table; touches no orders, no HubSpot, no Track A/B.
+
+- **LTL / freight is never touched.** Those shipments originate from Airtable work and carry
+  no Pipe17 parcel fulfillment; the carrier allowlist (`PARCEL_CARRIERS`) is the guard. An
+  order tagged `LTL`/`White Glove` that actually ships UPS **is** updated — the carrier, not
+  the tag, decides (this was the Nicole / `#BE66021836346` case).
+- **Forward-only + update-only.** Status is only ever advanced, never dragged back (reuses
+  Track A's guard; parity asserted in `selftest_parcel_tracking.py`). The job never creates
+  an Airtable row — a fulfillment whose shipment isn't in Airtable is skipped.
+- **First deploy ships `DRY_RUN=true`** (set in the workflow). It logs the per-shipment
+  would-updates and writes nothing. Confirm them, then flip `DRY_RUN=true` → `false` for the
+  parcel step in `deploy-cloud-run.yml` and push.
+- **Live-test one order** without scanning the window: **Actions → Run Cloud Run Job →
+  `pipe17-parcel-tracking`**, args `main_parcel_tracking.py,--ext-order-id,#BE66021836346`
+  (add `,--dry-run` to force a dry run even after the flag is flipped).
+- Reads with `PIPE17_API_KEY` (bound to `pipe17-api-key`) — the same key Track A uses for
+  `/shipments`; `/fulfillments` is the same order channel. If Pipe17 ever scopes
+  `/fulfillments` to a different key, set `PIPE17_FULFILLMENT_READ_KEY`.
+- `PARCEL_TRACKING_LOOKBACK_MINUTES` (default 120) is the window; keep it comfortably wider
+  than the scheduler cadence so a late run never drops a shipment.
+
+### Scheduler (every 30 min)
+
+```bash
+PROJECT_ID=pipe17-b2bops
+REGION=europe-west1
+PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+INVOKER_SA=$(gcloud scheduler jobs describe pipe17-airtable-sync-schedule \
+  --location "$REGION" --project "$PROJECT_ID" \
+  --format='value(httpTarget.oidcToken.serviceAccountEmail)')   # same SA as the others
+
+gcloud scheduler jobs create http pipe17-parcel-tracking-schedule \
+  --project "$PROJECT_ID" --location "$REGION" \
+  --schedule="*/30 * * * *" --time-zone="Etc/UTC" \
+  --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_NUM/jobs/pipe17-parcel-tracking:run" \
+  --http-method=POST \
+  --oauth-service-account-email="$INVOKER_SA" \
+  --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+```
+
+(Mirror the other schedulers' `--oidc-*` flags if they use those instead of `--oauth-*`.)
 
 ## The catalog-scoped Pipe17 key (`pipe17-catalog-key`)
 

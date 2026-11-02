@@ -87,7 +87,7 @@ import pipe17_client as pc
 status_calls = []
 
 
-def _fake_get(path, params=None, max_retries=4):
+def _fake_get(path, params=None, max_retries=4, headers=None):
     st = (params or {}).get("status")
     status_calls.append(st)
     if st == "readyForFulfillment":

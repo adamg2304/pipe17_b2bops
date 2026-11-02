@@ -4,16 +4,20 @@ import requests
 from config import (
     PIPE17_API_BASE, PIPE17_API_KEY, PIPE17_AUTH_HEADER, PIPE17_SINCE_PARAM,
     PIPE17_SHIPMENTS_PATH, PIPE17_ORDERS_PATH,
+    PIPE17_FULFILLMENTS_PATH, PIPE17_FULFILLMENT_READ_KEY,
 )
 
 HEADERS = {PIPE17_AUTH_HEADER: PIPE17_API_KEY, "Accept": "application/json"}
+# Fulfillment reads may use a different key than orders/shipments (see config).
+FULFILLMENT_HEADERS = {PIPE17_AUTH_HEADER: PIPE17_FULFILLMENT_READ_KEY,
+                       "Accept": "application/json"}
 
 
-def _get(path, params=None, max_retries=4):
+def _get(path, params=None, max_retries=4, headers=None):
     url = f"{PIPE17_API_BASE}{path}"
     last = None
     for attempt in range(max_retries):
-        last = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        last = requests.get(url, headers=headers or HEADERS, params=params, timeout=30)
         if last.status_code == 429 or last.status_code >= 500:
             time.sleep(2 ** attempt)
             continue
@@ -22,14 +26,14 @@ def _get(path, params=None, max_retries=4):
     last.raise_for_status()
 
 
-def _iter(path, list_key, updated_since_iso, page_size=100, extra_params=None):
+def _iter(path, list_key, updated_since_iso, page_size=100, extra_params=None, headers=None):
     skip = 0
     while True:
         params = {PIPE17_SINCE_PARAM: updated_since_iso, "count": page_size,
                   "skip": skip, "keys": "*"}
         if extra_params:
             params.update(extra_params)
-        data = _get(path, params=params)
+        data = _get(path, params=params, headers=headers)
         items = data.get(list_key, [])
         for item in items:
             yield item
@@ -68,6 +72,26 @@ def iter_orders(updated_since_iso, tag=None, statuses=None, page_size=100):
             if key is not None:
                 seen.add(key)
             yield order
+
+
+def iter_fulfillments(updated_since_iso, tag=None, page_size=100):
+    """Yield fulfillments updated in the window. Fulfillments carry the shipping carrier +
+    tracking number(s) for a shipment (the SR itself does not), so the parcel-tracking job
+    reads these to advance Airtable Status + write tracking. Optionally tag-scoped."""
+    extra = {"tags": tag} if tag else None
+    yield from _iter(PIPE17_FULFILLMENTS_PATH, "fulfillments", updated_since_iso,
+                     page_size, extra, headers=FULFILLMENT_HEADERS)
+
+
+def get_order_fulfillments(ext_order_id):
+    """Every fulfillment for one order (by external id). Used by the parcel-tracking job's
+    single-order test path (--ext-order-id)."""
+    if not ext_order_id:
+        return []
+    data = _get(PIPE17_FULFILLMENTS_PATH,
+                params={"extOrderId": ext_order_id, "count": 100, "keys": "*"},
+                headers=FULFILLMENT_HEADERS)
+    return data.get("fulfillments", []) or []
 
 
 def get_customer(customer_id):
