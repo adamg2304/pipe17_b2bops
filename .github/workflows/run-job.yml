@@ -16,8 +16,13 @@ on:
           - pipe17-airtable-sync
           - hubspot-pipe17-orders
           - pipe17-hubspot-inventory
+          - pipe17-parcel-tracking
       args:
         description: "Optional container args override, comma-separated (e.g. main_hubspot_to_pipe17.py,--deal-id,65076828954). Blank = the job's default."
+        type: string
+        default: ""
+      env:
+        description: "Optional env override for THIS run only, comma-separated KEY=VALUE (e.g. DRY_RUN=false). Blank = the job's deployed env."
         type: string
         default: ""
       wait:
@@ -47,10 +52,12 @@ jobs:
         env:
           JOB: ${{ inputs.job }}
           ARGS: ${{ inputs.args }}
+          ENVV: ${{ inputs.env }}
           WAIT: ${{ inputs.wait }}
         run: |
           EXTRA=()
           [ -n "$ARGS" ] && EXTRA+=("--args=$ARGS")
+          [ -n "$ENVV" ] && EXTRA+=("--update-env-vars=$ENVV")
           [ "$WAIT" = "true" ] && EXTRA+=("--wait")
           gcloud run jobs execute "$JOB" \
             --project "$GCP_PROJECT" \
