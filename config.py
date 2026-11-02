@@ -463,3 +463,44 @@ PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
 # field Pipe17 actually reads) before enabling.
 SO_RETAIL_PRICING = os.environ.get("SO_RETAIL_PRICING", "false").lower() == "true"
 PIPE17_ORDER_DISCOUNT_FIELD = os.environ.get("PIPE17_ORDER_DISCOUNT_FIELD", "discount")
+
+# ===========================================================================
+# Parcel shipment tracking sync (Pipe17 fulfillments -> Airtable shipments).
+# A separate Cloud Run job (main_parcel_tracking.py). It reads Pipe17 fulfillments in a
+# recent window and, for shipments that shipped via PARCEL (carrier in PARCEL_CARRIERS)
+# and were picked up by Pipe17 directly, advances the Airtable shipment Status to
+# In-Transit (forward-only) and writes the parcel tracking number(s). LTL/freight
+# shipments originate from Airtable work and carry no Pipe17 parcel fulfillment, so they
+# are never touched. Update-only: this job never creates an Airtable shipment row.
+#
+# Why it exists: an SR sits at Pipe17 status "fulfilled" (unmapped in STATUS_MAP) while
+# the carrier + tracking live on the FULFILLMENTS, not the SR — so Track A's SR sync left
+# parcel shipments stuck at "Processing" with no tracking (the Skubana behavior Ops lost).
+PIPE17_FULFILLMENTS_PATH = os.environ.get("PIPE17_FULFILLMENTS_PATH", "/fulfillments")
+# Fulfillment reads use the Track A order-channel key (the same key that reads /shipments);
+# overridable if Pipe17 ever scopes /fulfillments to a different key.
+PIPE17_FULFILLMENT_READ_KEY = (os.environ.get("PIPE17_FULFILLMENT_READ_KEY")
+                               or PIPE17_API_KEY)
+PARCEL_TRACKING_LOOKBACK_MINUTES = int(
+    os.environ.get("PARCEL_TRACKING_LOOKBACK_MINUTES", "120"))
+# Airtable Shipments "Parcel Tracking Number" (singleLineText).
+F_PARCEL_TRACKING = os.environ.get("F_PARCEL_TRACKING", "fldMCwPpccc9paBE0")
+# The in-transit Status option written when a parcel shipment ships (matches STATUS_MAP
+# and SHIP_STATUS_RANK's "In-Transit").
+SHIP_STATUS_IN_TRANSIT = os.environ.get("SHIP_STATUS_IN_TRANSIT", "In-Transit")
+# Carriers that count as PARCEL. Only these (Pipe17-fulfilled) shipments are auto-advanced;
+# freight carriers not listed here are excluded. Case-insensitive substring match against
+# the fulfillment's shippingCarrier, so service variants like "UPS Ground" / "USPS Priority"
+# match on the base name. The primary LTL guard is architectural (freight is booked in
+# Airtable and never produces a Pipe17 fulfillment); this allowlist is the backstop.
+PARCEL_CARRIERS = tuple(
+    s.strip().lower() for s in os.environ.get(
+        "PARCEL_CARRIERS",
+        "ups,fedex,usps,dhl,ontrac,lasership,canada post,purolator"
+    ).split(",") if s.strip())
+# Fulfillment statuses that are NOT a live shipment — skip tracking/status writes for these.
+PARCEL_SKIP_FULFILLMENT_STATUSES = {
+    s.strip() for s in os.environ.get(
+        "PARCEL_SKIP_FULFILLMENT_STATUSES",
+        "cancelled,canceled,failed,rejected,voided"
+    ).split(",") if s.strip()}
