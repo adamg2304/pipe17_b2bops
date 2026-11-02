@@ -117,8 +117,9 @@ jobs:
           # (forward-only) and write their tracking number(s). LTL/freight is never touched
           # (no parcel carrier). Update-only; reads Pipe17, writes only the Airtable
           # Shipments table. Scheduled via Cloud Scheduler (pipe17-parcel-tracking-schedule).
-          # FIRST DEPLOY SHIPS DRY_RUN=true — verify the logged would-updates, then flip
-          # DRY_RUN=true -> false here and push. SLACK_WEBHOOK_URL no-ops safely if empty.
+          # LIVE (DRY_RUN=false): verified end-to-end on #BE66021836346 (Processing ->
+          # In-Transit + UPS tracking). Set DRY_RUN=true here to pause writes. SLACK_WEBHOOK_URL
+          # no-ops safely if empty.
           gcloud run jobs deploy pipe17-parcel-tracking \
             --source . \
             --project "$GCP_PROJECT" \
@@ -126,7 +127,7 @@ jobs:
             --tasks 1 --max-retries 1 \
             --command python --args main_parcel_tracking.py \
             --set-secrets=PIPE17_API_KEY=pipe17-api-key:latest,AIRTABLE_API_KEY=airtable-pat:latest,SLACK_WEBHOOK_URL=slack-webhook-url:latest \
-            --set-env-vars=DRY_RUN=true,PARCEL_TRACKING_LOOKBACK_MINUTES=120
+            --set-env-vars=DRY_RUN=false,PARCEL_TRACKING_LOOKBACK_MINUTES=120
 
       # Manual-only (never on push): the ops "Sync Repair Requests" webhook service.
       # Deploy this once the repair table, its field-ID env vars, and the
