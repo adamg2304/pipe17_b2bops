@@ -272,6 +272,11 @@ HS_ORDERED_STAGE_ID = os.environ.get("HS_ORDERED_STAGE_ID", "5428967")          
 HS_ORDER_DETAILS_PROP = os.environ.get("HS_ORDER_DETAILS_PROP", "order_details")  # deal prop for the Pipe17 order number
 HS_DEAL_ID_CUSTOM_FIELD = os.environ.get("HS_DEAL_ID_CUSTOM_FIELD", "hubspot_deal_id")
 WRITEBACK_DEAL_ON_APPROVAL = os.environ.get("WRITEBACK_DEAL_ON_APPROVAL", "true").lower() == "true"
+# When true, the write-back ALSO advances the HubSpot deal to the Ordered-with-Warehouse
+# stage on Ops approval. Default OFF: Ops (and a HubSpot workflow) own deal-stage movement,
+# so the sync only records the Pipe17 order number and never moves the stage. Set to "true"
+# to restore the auto-advance.
+HS_ADVANCE_DEAL_STAGE = os.environ.get("HS_ADVANCE_DEAL_STAGE", "false").lower() == "true"
 
 # --- Cross-system deep links written onto Airtable rows ---------------------
 # Orders get a HubSpot deal link + Pipe17 order link; shipments get a Pipe17
