@@ -17,7 +17,7 @@ from config import (
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS, O_ORDER_DETAILS,
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
-    WRITEBACK_DEAL_ON_APPROVAL, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
+    WRITEBACK_DEAL_ON_APPROVAL, HS_ADVANCE_DEAL_STAGE, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
     PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS, F_STATUS, SHIP_STATUS_RANK,
     O_INVENTORY_STATE, O_EXCEPTION_FLAG,
@@ -136,9 +136,10 @@ def _hubspot_deal_id(order):
 
 
 def _writeback_deals(new_orders):
-    """On Ops approval (order now readyForFulfillment, first sync), move the HubSpot
-    deal to the Ordered-with-Warehouse stage and record the Pipe17 order number.
-    Per-deal errors are caught so a write-back failure never blocks the sync."""
+    """On Ops approval (order now readyForFulfillment, first sync), record the Pipe17 order
+    number on the HubSpot deal. The deal STAGE is left to Ops / a HubSpot workflow and is
+    only advanced to Ordered-with-Warehouse when HS_ADVANCE_DEAL_STAGE is enabled (off by
+    default). Per-deal errors are caught so a write-back failure never blocks the sync."""
     if not new_orders:
         return
     if not HUBSPOT_TOKEN:
@@ -151,14 +152,18 @@ def _writeback_deals(new_orders):
             log.warning("Deal write-back skipped for %s: no hubspot_deal_id.", o.get("extOrderId"))
             continue
         try:
-            hs.update_deal(deal_id, {"dealstage": HS_ORDERED_STAGE_ID,
-                                     HS_ORDER_DETAILS_PROP: o.get("extOrderId")})
+            props = {HS_ORDER_DETAILS_PROP: o.get("extOrderId")}
+            if HS_ADVANCE_DEAL_STAGE:
+                props["dealstage"] = HS_ORDERED_STAGE_ID
+            hs.update_deal(deal_id, props)
             done += 1
         except Exception:
             log.exception("Deal write-back failed for deal %s (order %s)",
                           deal_id, o.get("extOrderId"))
     if done:
-        log.info("HubSpot deals moved to Ordered-with-Warehouse: %d", done)
+        what = ("moved to Ordered-with-Warehouse + order number recorded"
+                if HS_ADVANCE_DEAL_STAGE else "order number recorded (stage left to Ops)")
+        log.info("HubSpot deal write-back: %d (%s)", done, what)
 
 
 def _generate_packing_lists(records, raw_by_num, prior_line_items):
