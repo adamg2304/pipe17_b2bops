@@ -18,6 +18,16 @@ def _headers(api_key):
             "Content-Type": "application/json"}
 
 
+def _raise_with_body(resp):
+    """raise_for_status, but include Pipe17's response body in the error so a 4xx
+    validation rejection says WHICH field it rejected (plain raise_for_status hides it)."""
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        detail = (resp.text or "").strip()[:1500]
+        raise requests.HTTPError(f"{e} | pipe17 response: {detail}", response=resp) from None
+
+
 def _request(method, path, api_key, params=None, body=None, max_retries=4):
     url = f"{PIPE17_API_BASE}{path}"
     last = None
@@ -26,9 +36,9 @@ def _request(method, path, api_key, params=None, body=None, max_retries=4):
                                 params=params, json=body, timeout=30)
         if last.status_code == 429 or last.status_code >= 500:
             time.sleep(2 ** attempt); continue
-        last.raise_for_status()
+        _raise_with_body(last)
         return last.json() if last.content else {}
-    last.raise_for_status()
+    _raise_with_body(last)
 
 
 def get_order_by_ext_id(ext_order_id, api_key):
