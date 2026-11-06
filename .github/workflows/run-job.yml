@@ -72,5 +72,5 @@ jobs:
           echo "=== recent logs for $JOB (last 10m) ==="
           gcloud logging read \
             "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\"" \
-            --project "$GCP_PROJECT" --limit 150 --freshness=10m \
-            --format='value(timestamp,textPayload)' --order=asc || true
+            --project "$GCP_PROJECT" --limit 60 --freshness=20m \
+            --format='value(timestamp,severity,textPayload,jsonPayload.message)' --order=desc || true
