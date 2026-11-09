@@ -112,6 +112,24 @@ SHIP_STATUS_RANK = {
 # Packing lists are generated only for shipments in these Pipe17 statuses (BLK-1/3):
 # a shipment must be handed to the warehouse before its pick list is real.
 PACKING_LIST_STATUSES = {PIPE17_STATUS_SENT}
+
+# --- Provisional vs committed shipping requests (warehouse changes) ----------
+# Before an SR is sent to fulfillment its warehouse is provisional: back-ordered stock is
+# parked on a VIRTUAL location (e.g. "Canada Backorders B2B") and Pipe17 re-routes it to
+# a real warehouse once inventory lands. Pipe17 can also cancel an SR and re-create one
+# under the SAME extShipmentId (seen on #CEN66138513506: a 5-unit SR on the backorder
+# location reused the number of the live 29-unit Mantoria SR and overwrote its row).
+#
+# Rule: Origin WH, Line Items and Shipment Creation Date ("routing fields") on an
+# EXISTING Airtable row are only overwritten by an SR that has been sent to fulfillment
+# (or is past it). A provisional SR still fills them when it creates the row, so the
+# backorder location stays visible, but it never clobbers a row afterwards. A change of
+# warehouse after the SR is sent always flows through.
+SR_COMMITTED_STATUSES = {
+    PIPE17_STATUS_SENT, "fulfilled", "partialFulfillment",
+    "readyToShip", "partialShipped", "shipped", "inTransit", "delivered",
+}
+SR_CANCELED_STATUSES = {"canceled", "canceledRestock", "returned"}
 NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false").lower() == "true"
 
 # ============================================================================
