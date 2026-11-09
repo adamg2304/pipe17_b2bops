@@ -36,3 +36,4 @@ jobs:
           python selftest_repair.py
           python selftest_parcel_tracking.py
           python selftest_shipment_gate.py
+          python selftest_inventory_freshness.py
