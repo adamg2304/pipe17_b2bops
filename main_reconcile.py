@@ -14,6 +14,10 @@ Every run reports to Slack: an alert naming the orders it healed when there was 
 a one-line all-clear heartbeat when there wasn't. A dead or failing sweep therefore shows
 up as a missing heartbeat or a failure alert, instead of orders quietly going missing.
 
+The heartbeat also carries a freshness line for the Pipe17 -> HubSpot inventory sync
+(newest inventory_last_synced_at on any product). That job can't report its own absence,
+so this daily sweep is its watchdog.
+
 Run:
   python main_reconcile.py                    # uses RECONCILE_LOOKBACK_DAYS
   RECONCILE_LOOKBACK_DAYS=30 python main_reconcile.py
@@ -25,6 +29,7 @@ import sys
 from config import RECONCILE_LOOKBACK_DAYS, PIPE17_TAG_FILTER, DRY_RUN
 import main as sync
 import notify
+import inventory_freshness
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("pipe17-airtable")
@@ -62,7 +67,22 @@ def main():
                f"in Airtable over the last {RECONCILE_LOOKBACK_DAYS}d.")
         log.info(msg)
     notify.slack(msg)
+    _check_inventory_freshness()
     log.info("Reconcile complete.")
+
+
+def _check_inventory_freshness():
+    """Daily watchdog for the Pipe17 -> HubSpot inventory job. A job that never runs
+    can't report on itself, so this sweep (which does run) checks the newest
+    inventory_last_synced_at stamp and posts it. Never fails the reconcile."""
+    try:
+        stale, line = inventory_freshness.check()
+    except Exception as e:
+        log.exception("Inventory freshness check failed")
+        notify.slack(f":warning: Could not check HubSpot inventory freshness: {e}")
+        return
+    (log.warning if stale else log.info)(line)
+    notify.slack(line)
 
 
 if __name__ == "__main__":

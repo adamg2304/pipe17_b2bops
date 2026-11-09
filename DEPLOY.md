@@ -107,6 +107,13 @@ Touches no deals, orders, or the order/shipment sync.
   bucketed purely by warehouse country — so stock on any version counts. The channel
   Channel-SKU alias is NOT used here (it only governs which version an order draws).
   `inventory_total = inventory_us + inventory_ca` (MX/BR excluded).
+- **Freshness stamp:** every run sets `inventory_last_synced_at` (HubSpot datetime) on
+  every product it matched to Pipe17, changed or not. Unchanged products get a
+  stamp-only write. Disable with `HS_INVENTORY_SYNCED_AT_PROP=""`.
+- **Alerting:** a crashed run posts `INVENTORY SYNC FAILED` to Slack (the job now binds
+  `SLACK_WEBHOOK_URL`). A job that never runs can't alert, so the daily reconcile
+  heartbeat also posts the newest stamp and flags it STALE when it is older than
+  `INVENTORY_STALE_HOURS` (default 3).
 
 ### Scheduler (hourly)
 
@@ -133,6 +140,24 @@ gcloud scheduler jobs create http pipe17-hubspot-inventory-schedule \
 
 (If the existing schedulers use `--oidc-*` flags instead, mirror those — the point is
 the same invoker SA and a `0 * * * *` cadence.)
+
+**The invoker SA needs `roles/run.invoker` on THIS job.** The grant is per job, not
+project-wide, so a scheduler pointing at a new job fails with status code 7
+(PERMISSION_DENIED) until it is added. Nothing shows in the job's executions list when
+that happens; only `gcloud scheduler jobs describe` shows the error. This is what kept
+the inventory schedule (`pipe17-hubspot-inventory-20m`) from ever running between
+2026-10-06 and 2026-11-09:
+
+```bash
+gcloud run jobs add-iam-policy-binding pipe17-hubspot-inventory \
+  --project pipe17-b2bops --region europe-west1 \
+  --member "serviceAccount:pipe17-sync-invoker@pipe17-b2bops.iam.gserviceaccount.com" \
+  --role roles/run.invoker
+```
+
+Verify a scheduled run actually starts the job: `RUN BY` in
+`gcloud run jobs executions list --job pipe17-hubspot-inventory ...` should show the
+invoker SA, not `gh-deployer`.
 
 If the scheduler already exists on the old 20-min cadence, just update it in place:
 
