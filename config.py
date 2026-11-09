@@ -333,6 +333,13 @@ HS_PRODUCT_SKU_PROP = os.environ.get("HS_PRODUCT_SKU_PROP", "hs_sku")
 HS_INVENTORY_US_PROP = os.environ.get("HS_INVENTORY_US_PROP", "inventory_us")
 HS_INVENTORY_CA_PROP = os.environ.get("HS_INVENTORY_CA_PROP", "inventory_ca")
 HS_INVENTORY_TOTAL_PROP = os.environ.get("HS_INVENTORY_TOTAL_PROP", "inventory_total")
+# Freshness stamp (HubSpot datetime property). Every product the job matches to Pipe17
+# gets this set to the run time, changed or not, so the quote can say "as of" and the
+# daily reconcile can alert when the job stops running. Set to "" to disable.
+HS_INVENTORY_SYNCED_AT_PROP = os.environ.get("HS_INVENTORY_SYNCED_AT_PROP", "inventory_last_synced_at")
+# The reconcile heartbeat flags inventory as stale when the newest stamp is older than
+# this. The job runs hourly, so 3h tolerates a couple of missed runs before alerting.
+INVENTORY_STALE_HOURS = float(os.environ.get("INVENTORY_STALE_HOURS", "3"))
 
 # --- Line-item inventory fan-out (same run, gated OFF) ----------------------
 # HubSpot can't report on products, only on line items of deals, so the same

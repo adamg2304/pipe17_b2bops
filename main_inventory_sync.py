@@ -19,11 +19,13 @@ product-only sync always has.
 """
 import logging
 import sys
+import time
 
 from config import DRY_RUN, PIPE17_INVENTORY_READ_KEY, INVENTORY_LINE_ITEM_SYNC
 import pipe17_inventory as inv
 import hubspot_products as hsp
 import hubspot_lineitems as hsli
+import notify
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("inventory-sync")
@@ -81,15 +83,21 @@ def main():
             _memo[base] = inv.compute_inventory(base, inv_by_base, country_map)
         return _memo[base]
 
-    _sync_products(compute, only_sku, dry_run)
+    run_ms = int(time.time() * 1000)
+    _sync_products(compute, only_sku, dry_run, run_ms)
     if do_line_items:
         _sync_line_items(compute, dry_run)
     elif INVENTORY_LINE_ITEM_SYNC and only_sku:
         log.info("Line-item sync skipped: --sku is a product-only probe.")
 
 
-def _sync_products(compute, only_sku, dry_run):
+def _sync_products(compute, only_sku, dry_run, run_ms):
+    """Write changed inventory numbers, and stamp inventory_last_synced_at on EVERY
+    matched product (changed or not). The stamp is what lets the quote show "as of" and
+    lets the reconcile heartbeat notice when this job stops running. Unchanged products
+    get a stamp-only write."""
     updates = []
+    stamp = hsp.synced_at_properties(run_ms)
     seen = matched = unmatched = no_sku = unchanged = 0
     for product in hsp.iter_products():
         base_sku = (product.get("sku") or "").strip()
@@ -115,8 +123,11 @@ def _sync_products(compute, only_sku, dry_run):
                       or _changed(product.get("inventory_total"), r["inventory_total"]))
         if not is_changed:
             unchanged += 1
+            if stamp:
+                updates.append({"id": product["id"], "properties": dict(stamp)})
             continue
 
+        props.update(stamp)
         log.info("product %s -> US=%d  CA=%d  total=%d%s",
                  base_sku, r["inventory_us"], r["inventory_ca"], r["inventory_total"],
                  "  [DRY_RUN]" if dry_run else "")
@@ -127,7 +138,7 @@ def _sync_products(compute, only_sku, dry_run):
         written = hsp.batch_update(updates)
 
     log.info("Products done. seen=%d matched=%d unmatched=%d no_sku=%d unchanged=%d "
-             "to_write=%d written=%d%s",
+             "to_write=%d (incl. stamp-only) written=%d%s",
              seen, matched, unmatched, no_sku, unchanged, len(updates), written,
              " (DRY_RUN: nothing written)" if dry_run else "")
 
@@ -177,6 +188,7 @@ def _sync_line_items(compute, dry_run):
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as e:
         log.exception("Inventory sync failed")
+        notify.slack(f":rotating_light: Pipe17 -> HubSpot INVENTORY SYNC FAILED: {e}")
         sys.exit(1)

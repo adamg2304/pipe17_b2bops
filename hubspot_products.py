@@ -1,6 +1,7 @@
 """HubSpot product-library client: list products by SKU, batch-patch inventory.
 
-Writes only the three inventory properties on the product object. inventory_us /
+Writes only the three inventory properties plus the inventory_last_synced_at
+freshness stamp on the product object. inventory_us /
 inventory_ca / inventory_total are all number properties.
 """
 import time
@@ -9,6 +10,7 @@ import requests
 from config import (
     HUBSPOT_TOKEN, HUBSPOT_API_BASE, HS_PRODUCT_OBJECT, HS_PRODUCT_SKU_PROP,
     HS_INVENTORY_US_PROP, HS_INVENTORY_CA_PROP, HS_INVENTORY_TOTAL_PROP,
+    HS_INVENTORY_SYNCED_AT_PROP,
 )
 
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
@@ -66,6 +68,14 @@ def inventory_properties(inv_us, inv_ca, inv_total):
         HS_INVENTORY_CA_PROP: inv_ca,
         HS_INVENTORY_TOTAL_PROP: inv_total,
     }
+
+
+def synced_at_properties(run_ms):
+    """Freshness-stamp payload (HubSpot datetime takes epoch ms). Empty when the stamp
+    property is disabled via HS_INVENTORY_SYNCED_AT_PROP=""."""
+    if not HS_INVENTORY_SYNCED_AT_PROP:
+        return {}
+    return {HS_INVENTORY_SYNCED_AT_PROP: str(int(run_ms))}
 
 
 def batch_update(updates):
