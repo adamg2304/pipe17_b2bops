@@ -30,6 +30,7 @@ import hubspot_client as hs
 from transform import shipment_to_airtable, order_number_of
 from order_transform import order_to_airtable
 import inventory_state
+import shipment_gate
 import docs_render
 import airtable_attach
 import gcs_upload
@@ -178,16 +179,28 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
     that already have a list are skipped (idempotent). Errors are caught per-record
     and never block the sync.
     """
-    made = 0
+    made = cleared = 0
     for rec in records:
         f = rec.get("fields", {})
         num = f.get(SHIPMENT_NUMBER_FIELD)
         shipment = raw_by_num.get(num)
         if not shipment:
             continue
-        if shipment.get("status") not in PACKING_LIST_STATUSES:
-            continue   # not warehouse-bound yet -> no pick list
         has_pl = bool(f.get(SHIP_PACKING_LIST_ATTACH))
+        if shipment.get("status") not in PACKING_LIST_STATUSES:
+            # Not warehouse-bound -> no pick list. If the SR has dropped back to a pre-send
+            # status (canceled at the warehouse and re-submitted for review), the list on
+            # the row describes a shipment that no longer exists: clear it so Shipment
+            # Details only ever holds a list for an SR that is sent to fulfillment. A
+            # committed or canceled SR keeps its list as the record of what was sent.
+            if (has_pl and not shipment_gate.is_committed(shipment)
+                    and not shipment_gate.is_canceled(shipment)):
+                try:
+                    at.update_record(SHIPMENTS_TABLE, rec["id"], {SHIP_PACKING_LIST_ATTACH: []})
+                    cleared += 1
+                except Exception:
+                    log.exception("Clearing stale packing list failed for %s", num)
+            continue
         changed = num in prior_line_items and prior_line_items[num] != f.get(F_LINE_ITEMS)
         if has_pl and not changed:
             continue   # already generated, contents unchanged
@@ -202,6 +215,8 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
             log.exception("Packing list failed for %s", num)
     if made:
         log.info("Packing lists generated + attached: %d", made)
+    if cleared:
+        log.info("Stale packing lists cleared (SR back before sent-to-fulfillment): %d", cleared)
 
 
 def _status_regresses(current, new):
@@ -246,12 +261,42 @@ def sync_shipments(since, tag):
     except Exception:
         log.exception("Could not read Pipe17 /locations; using static LOCATION_MAP for Origin WH")
 
-    shipments, skipped = [], 0
-    unmatched_orders = set()
+    # Pick ONE owning SR per shipment number. Pipe17 can cancel an SR and re-create one
+    # under the same extShipmentId; without this, whichever SR updated last in the window
+    # overwrote the row (a canceled 5-unit backorder SR replaced the live 29-unit one).
+    owners, skipped, superseded = {}, 0, 0
+    order_srs_cache = {}
     for sr in p17.iter_shipping_requests(since, tag=tag or None):
         if tag and tag not in (sr.get("tags") or []):
             skipped += 1
             continue
+        key = sr.get("extShipmentId")
+        if not key:
+            continue
+        if shipment_gate.is_canceled(sr):
+            # A canceled SR may share its number with a live SR that updated outside the
+            # window. Look at every SR on the order and let the live one own the row.
+            ext_order_id = order_number_of(sr)
+            if ext_order_id not in order_srs_cache:
+                try:
+                    order_srs_cache[ext_order_id] = p17.get_order_shipments(ext_order_id)
+                except Exception:
+                    log.exception("Sibling SR lookup failed for %s", ext_order_id)
+                    order_srs_cache[ext_order_id] = []
+            owner = shipment_gate.prefer(
+                sr, shipment_gate.pick_owner(order_srs_cache[ext_order_id], key))
+            if owner is not sr:
+                superseded += 1
+                log.info("SR %s: canceled SR %s superseded by live SR %s (status %s)",
+                         key, sr.get("shipmentId"), owner.get("shipmentId"), owner.get("status"))
+                sr = owner
+        owners[key] = shipment_gate.prefer(owners.get(key), sr)
+    if superseded:
+        log.info("%d canceled SR(s) superseded by a live SR with the same number", superseded)
+
+    shipments = []
+    unmatched_orders = set()
+    for sr in owners.values():
         fields = shipment_to_airtable(sr, location_map=loc_map)
         if not fields.get(SHIPMENT_NUMBER_FIELD):
             continue
@@ -276,6 +321,28 @@ def sync_shipments(since, tag):
                     len(shipments) - linked, len(shipments),
                     ", ".join(sorted(o for o in unmatched_orders if o)))
 
+    # Read each existing row's stored fields once, BEFORE the upsert overwrites them.
+    # Used for (a) the provisional-SR routing gate, (b) the forward-only Status guard, and
+    # (c) BLK-4 Line Items change detection for packing-list regeneration. Read-only, so
+    # it also runs under DRY_RUN to make the dry-run log show what would really be written.
+    prior = {}
+    if shipments:
+        for num in raw_by_num:
+            existing = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, num)
+            if existing:
+                prior[num] = existing.get("fields") or {}
+    # Provisional SRs (not yet sent to fulfillment) never overwrite Origin WH / Line Items
+    # / Shipment Creation Date on an existing row: the warehouse may be a virtual backorder
+    # location Pipe17 will change, and ops may have corrected it by hand. Once the SR is
+    # sent to fulfillment its routing is final and a warehouse change flows through.
+    gated = 0
+    for f in shipments:
+        num = f.get(SHIPMENT_NUMBER_FIELD)
+        if shipment_gate.gate_routing_fields(f, raw_by_num.get(num), num in prior):
+            gated += 1
+    if gated:
+        log.info("Routing fields held on %d shipment(s) not yet sent to fulfillment", gated)
+
     if shipments and DRY_RUN:
         log.info("DRY_RUN: not writing. Sample of mapped records:")
         for f in shipments[:10]:
@@ -284,14 +351,6 @@ def sync_shipments(since, tag):
             log.info("  %s -> Order Link %s | %s", f.get(SHIPMENT_NUMBER_FIELD),
                      f.get(SHIPMENT_ORDER_LINK_FIELD, "(none)"), readable)
     elif shipments:
-        # Read each existing row's stored fields once, BEFORE the upsert overwrites them.
-        # Used for (a) the forward-only Status guard below, and (b) BLK-4 Line Items change
-        # detection so the packing-list step knows when a shipment re-split/re-routed.
-        prior = {}
-        for num in raw_by_num:
-            existing = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, num)
-            if existing:
-                prior[num] = existing.get("fields") or {}
         # Forward-only Status: drop the Status write when Pipe17's status would move the
         # row backward past what Airtable already shows (ops book/ship ahead of Pipe17).
         held = 0

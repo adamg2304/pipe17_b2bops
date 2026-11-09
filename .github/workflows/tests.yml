@@ -35,3 +35,4 @@ jobs:
           python selftest_shipment_status.py
           python selftest_repair.py
           python selftest_parcel_tracking.py
+          python selftest_shipment_gate.py

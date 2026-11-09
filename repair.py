@@ -16,6 +16,7 @@ import re
 import pipe17_client as p17
 import airtable_client as at
 import inventory_state
+import shipment_gate
 from transform import shipment_to_airtable
 from order_transform import order_to_airtable
 from config import (
@@ -170,6 +171,14 @@ def _repair_sr(num, force, dry_run):
                        status=REPAIR_STATUS_HEALED,
                        diagnosis=f"Would upsert {len(targets)} shipping request(s) for {ext_order}.",
                        outcome="[dry-run] no write.")
+
+    # One owning SR per shipment number: Pipe17 can re-create an SR under a canceled
+    # one's number, and the canceled copy must not overwrite the live row.
+    owners = {}
+    for s in targets:
+        key = s.get("extShipmentId")
+        owners[key] = shipment_gate.prefer(owners.get(key), s)
+    targets = list(owners.values())
 
     loc_map = _loc_map()
     n = 0
