@@ -316,9 +316,12 @@ GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "
 GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower() == "true"  # on once shipment leg proven
 O_ORDER_ATTACHMENTS = "fldo34yjW8UPZKNJ5"        # Orders multipleAttachments — order slip PDF
 SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments — packing list PDF
-# Shipment Details Link (url): public GCS copy of the packing list above. The Hub reads
-# this link, not the attachment; it went blank for Pipe17-created shipments in October.
-SHIP_DETAILS_LINK = os.environ.get("SHIP_DETAILS_LINK", "fldeZmtng1xGgafwe")
+# Shipment Details link (url): public GCS copy of the packing list above. The Hub reads
+# this link, not the attachment. It is the field that held the old Google Drive
+# "uc?id=...&export=download" links (6.6k pre-Pipe17 rows) and went blank for
+# Pipe17-created shipments in October. (fldeZmtng1xGgafwe looks similar but was never
+# used: two 2024 test values.)
+SHIP_DETAILS_LINK = os.environ.get("SHIP_DETAILS_LINK", "fldxAfnulhzmW18Nd")
 
 # Public hosting for the order-slip PDF: the sync uploads it to a public GCS bucket and
 # writes the stable public URL into the Order Details field (O_ORDER_DETAILS). When the
