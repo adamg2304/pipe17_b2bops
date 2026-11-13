@@ -25,6 +25,14 @@ Airtable **field IDs**. A fail-safe aborts any live run with the tag gate disabl
 Order contact (name/email/phone/company) is read from the Pipe17 **customer** object,
 which Track B attaches.
 
+### Shipment Details + link
+When a shipment is sent to fulfillment, the sync attaches its packing list to **Shipment
+Details** and publishes the same PDF to the public GCS bucket (`GCS_ORDER_SLIP_BUCKET`,
+under `packing-lists/`). The URL goes in **Shipment Details Link**, which the Hub reads.
+A row with a file but no link gets the attached file published on its next sync. To
+backfill every such Pipe17-created row at once, run the `pipe17-airtable-sync` job from the **Run job**
+workflow with args `main.py,--backfill-shipment-links`. It is idempotent.
+
 ## Track B — HubSpot -> Pipe17 (`main_hubspot_to_pipe17.py`)
 Poller Job. Finds deposit-paid deals (stage `10492961`) without a `pipe17_order_id`,
 builds a Pipe17 **draft** order, and creates it with the currency-appropriate key (USD ->

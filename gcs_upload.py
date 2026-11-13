@@ -1,4 +1,5 @@
-"""Upload an order-slip PDF to a public GCS bucket and return its stable public URL.
+"""Upload an order-slip or packing-list PDF to a public GCS bucket and return its
+stable public URL.
 
 No-ops (returns None) when GCS_ORDER_SLIP_BUCKET is unset, so the sync keeps working
 before the bucket exists. google-cloud-storage is imported lazily so the offline
@@ -9,7 +10,7 @@ bucket must allow public read for the returned URL to resolve without a login.
 import logging
 import uuid
 
-from config import GCS_ORDER_SLIP_BUCKET, GCS_ORDER_SLIP_PREFIX
+from config import GCS_ORDER_SLIP_BUCKET, GCS_ORDER_SLIP_PREFIX, GCS_PACKING_LIST_PREFIX
 
 log = logging.getLogger("pipe17-airtable")
 
@@ -24,14 +25,23 @@ def _bucket():
     return _client.bucket(GCS_ORDER_SLIP_BUCKET)
 
 
-def upload_order_slip(order_number, pdf_bytes):
+def _upload(prefix, number, pdf_bytes):
     """Upload the PDF and return its public URL, or None when no bucket is configured.
     The object name carries a random suffix so the public URL can't be guessed from the
-    order number."""
+    order or shipment number."""
     if not GCS_ORDER_SLIP_BUCKET:
         return None
-    safe = str(order_number or "order").lstrip("#").replace("/", "-")
-    path = f"{GCS_ORDER_SLIP_PREFIX}{safe}-{uuid.uuid4().hex[:12]}.pdf"
+    safe = str(number or "doc").lstrip("#").replace("/", "-")
+    path = f"{prefix}{safe}-{uuid.uuid4().hex[:12]}.pdf"
     blob = _bucket().blob(path)
     blob.upload_from_string(pdf_bytes, content_type="application/pdf")
     return f"https://storage.googleapis.com/{GCS_ORDER_SLIP_BUCKET}/{path}"
+
+
+def upload_order_slip(order_number, pdf_bytes):
+    return _upload(GCS_ORDER_SLIP_PREFIX, order_number, pdf_bytes)
+
+
+def upload_packing_list(shipment_number, pdf_bytes):
+    """Same bucket as the order slips, under its own prefix."""
+    return _upload(GCS_PACKING_LIST_PREFIX, shipment_number, pdf_bytes)

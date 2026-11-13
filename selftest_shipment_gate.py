@@ -11,7 +11,7 @@ import main
 import shipment_gate as g
 import pipe17_inventory
 from config import (F_ORIGIN_WH, F_LINE_ITEMS, F_SHIPMENT_CREATION_DATE, F_STATUS,
-                    SHIPMENT_NUMBER_FIELD, SHIP_PACKING_LIST_ATTACH)
+                    SHIPMENT_NUMBER_FIELD, SHIP_PACKING_LIST_ATTACH, SHIP_DETAILS_LINK)
 
 passed = failed = 0
 
@@ -69,6 +69,7 @@ def run(window, siblings, existing):
     main.docs_render.render_pdf = lambda html: b"%PDF"
     main.docs_render.packing_list_html = lambda s: ""
     main.airtable_attach.attach_pdf = lambda *a: updates.append({"attached": a[2]})
+    main.gcs_upload.upload_packing_list = lambda num, pdf: None
     main.sync_shipments("2026-11-05T00:00:00Z", "Airtable")
     return writes, updates
 
@@ -91,7 +92,8 @@ check("same-number SRs in one window -> live SR wins", w[0].get(F_ORIGIN_WH) == 
 w, u = run([REVIEW], [REVIEW], ROW)
 check("provisional SR doesn't overwrite Origin WH", F_ORIGIN_WH not in w[0])
 check("provisional SR doesn't overwrite Line Items", F_LINE_ITEMS not in w[0])
-check("provisional SR clears stale Shipment Details", {SHIP_PACKING_LIST_ATTACH: []} in u)
+check("provisional SR clears stale Shipment Details + link",
+      {SHIP_PACKING_LIST_ATTACH: [], SHIP_DETAILS_LINK: None} in u)
 
 # Brand-new provisional SR: row created with the backorder WH, no Shipment Details.
 w, u = run([REVIEW], [REVIEW], None)

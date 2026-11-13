@@ -19,3 +19,10 @@ def attach_pdf(record_id, field_id, filename, pdf_bytes):
                          json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()
+
+
+def download(url):
+    """Bytes of an existing Airtable attachment (its signed URL needs no auth header)."""
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    return resp.content
