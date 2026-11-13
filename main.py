@@ -16,7 +16,7 @@ from config import (
     ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD, FIELD_LABELS,
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS, O_ORDER_DETAILS,
-    GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH,
+    GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH, SHIP_DETAILS_LINK,
     WRITEBACK_DEAL_ON_APPROVAL, HS_ADVANCE_DEAL_STAGE, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
     PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS, F_STATUS, SHIP_STATUS_RANK,
@@ -179,7 +179,7 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
     that already have a list are skipped (idempotent). Errors are caught per-record
     and never block the sync.
     """
-    made = cleared = 0
+    made = cleared = linked = 0
     for rec in records:
         f = rec.get("fields", {})
         num = f.get(SHIPMENT_NUMBER_FIELD)
@@ -187,6 +187,7 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
         if not shipment:
             continue
         has_pl = bool(f.get(SHIP_PACKING_LIST_ATTACH))
+        has_link = bool(f.get(SHIP_DETAILS_LINK))
         if shipment.get("status") not in PACKING_LIST_STATUSES:
             # Not warehouse-bound -> no pick list. If the SR has dropped back to a pre-send
             # status (canceled at the warehouse and re-submitted for review), the list on
@@ -196,27 +197,93 @@ def _generate_packing_lists(records, raw_by_num, prior_line_items):
             if (has_pl and not shipment_gate.is_committed(shipment)
                     and not shipment_gate.is_canceled(shipment)):
                 try:
-                    at.update_record(SHIPMENTS_TABLE, rec["id"], {SHIP_PACKING_LIST_ATTACH: []})
+                    at.update_record(SHIPMENTS_TABLE, rec["id"],
+                                     {SHIP_PACKING_LIST_ATTACH: [], SHIP_DETAILS_LINK: None})
                     cleared += 1
                 except Exception:
                     log.exception("Clearing stale packing list failed for %s", num)
             continue
         changed = num in prior_line_items and prior_line_items[num] != f.get(F_LINE_ITEMS)
         if has_pl and not changed:
-            continue   # already generated, contents unchanged
+            # Already generated, contents unchanged. Backlog row (file, no link): publish
+            # the attached file itself so the link always matches Shipment Details.
+            if not has_link and _link_existing_packing_list(rec["id"], num, f):
+                linked += 1
+            continue
         try:
             if has_pl and changed:   # clear the stale list before replacing it
-                at.update_record(SHIPMENTS_TABLE, rec["id"], {SHIP_PACKING_LIST_ATTACH: []})
+                at.update_record(SHIPMENTS_TABLE, rec["id"],
+                                 {SHIP_PACKING_LIST_ATTACH: [], SHIP_DETAILS_LINK: None})
             pdf = docs_render.render_pdf(docs_render.packing_list_html(shipment))
             fname = "PackingList_%s.pdf" % (str(num or "shipment").lstrip("#"))
             airtable_attach.attach_pdf(rec["id"], SHIP_PACKING_LIST_ATTACH, fname, pdf)
             made += 1
         except Exception:
             log.exception("Packing list failed for %s", num)
+            continue
+        if _publish_packing_list_link(rec["id"], num, pdf):
+            linked += 1
     if made:
         log.info("Packing lists generated + attached: %d", made)
+    if linked:
+        log.info("Shipment Details links written: %d", linked)
     if cleared:
         log.info("Stale packing lists cleared (SR back before sent-to-fulfillment): %d", cleared)
+
+
+def _publish_packing_list_link(record_id, num, pdf):
+    """Upload the packing-list PDF to the public bucket and write its URL to Shipment
+    Details Link. Returns True on a write. Never raises: a link failure must not undo
+    the attachment or block the sync."""
+    try:
+        url = gcs_upload.upload_packing_list(num, pdf)
+        if not url:
+            return False   # bucket not configured
+        at.update_record(SHIPMENTS_TABLE, record_id, {SHIP_DETAILS_LINK: url})
+        return True
+    except Exception:
+        log.exception("Shipment Details link failed for %s", num)
+        return False
+
+
+def _link_existing_packing_list(record_id, num, fields):
+    """Publish the PDF already in Shipment Details (not a re-render) and write its link."""
+    att = (fields.get(SHIP_PACKING_LIST_ATTACH) or [{}])[0]
+    if not att.get("url"):
+        return False
+    try:
+        pdf = airtable_attach.download(att["url"])
+    except Exception:
+        log.exception("Downloading Shipment Details failed for %s", num)
+        return False
+    return _publish_packing_list_link(record_id, num, pdf)
+
+
+def backfill_shipment_links(dry_run):
+    """One-time, idempotent: every Shipments row with a Shipment Details file and an
+    empty Shipment Details Link gets the file published and its link written."""
+    # Filtered here, not by formula: formulas need field names, and the sync only keys on
+    # field IDs (a renamed column must not silently empty the backfill).
+    rows = at.list_records(SHIPMENTS_TABLE, "TRUE()",
+                           field_ids=[SHIPMENT_NUMBER_FIELD, SHIP_PACKING_LIST_ATTACH,
+                                      SHIP_DETAILS_LINK])
+    records = [r for r in rows if (r.get("fields") or {}).get(SHIP_PACKING_LIST_ATTACH)
+               and not (r.get("fields") or {}).get(SHIP_DETAILS_LINK)]
+    log.info("Shipment link backfill: %d of %d rows have a file and no link",
+             len(records), len(rows))
+    wrote = failed = 0
+    for rec in records:
+        f = rec.get("fields") or {}
+        num = f.get(SHIPMENT_NUMBER_FIELD)
+        if dry_run:
+            log.info("[DRY_RUN] would publish Shipment Details for %s", num)
+            continue
+        if _link_existing_packing_list(rec["id"], num, f):
+            wrote += 1
+        else:
+            failed += 1
+    log.info("Shipment link backfill done: wrote=%d failed=%d", wrote, failed)
+    return wrote, failed
 
 
 def _status_regresses(current, new):
@@ -438,6 +505,12 @@ def _lookback_minutes():
 
 
 def main():
+    # One-time Shipment Details Link backfill (idempotent); does nothing else.
+    if "--backfill-shipment-links" in sys.argv:
+        log.info("Mode: Shipment Details Link backfill | DRY_RUN=%s", DRY_RUN)
+        backfill_shipment_links(DRY_RUN)
+        return
+
     # One-time inventory-state backfill mode (idempotent); does nothing else.
     if "--backfill-inventory-state" in sys.argv:
         log.info("Mode: inventory-state backfill | DRY_RUN=%s", DRY_RUN)

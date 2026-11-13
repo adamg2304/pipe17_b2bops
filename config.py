@@ -316,6 +316,9 @@ GENERATE_ORDER_SLIP = os.environ.get("GENERATE_ORDER_SLIP", "true").lower() == "
 GENERATE_PACKING_LIST = os.environ.get("GENERATE_PACKING_LIST", "false").lower() == "true"  # on once shipment leg proven
 O_ORDER_ATTACHMENTS = "fldo34yjW8UPZKNJ5"        # Orders multipleAttachments — order slip PDF
 SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments — packing list PDF
+# Shipment Details Link (url): public GCS copy of the packing list above. The Hub reads
+# this link, not the attachment; it went blank for Pipe17-created shipments in October.
+SHIP_DETAILS_LINK = os.environ.get("SHIP_DETAILS_LINK", "fldeZmtng1xGgafwe")
 
 # Public hosting for the order-slip PDF: the sync uploads it to a public GCS bucket and
 # writes the stable public URL into the Order Details field (O_ORDER_DETAILS). When the
@@ -324,6 +327,7 @@ SHIP_PACKING_LIST_ATTACH = "fldyEzJwoGg8Lpjem"   # Shipments multipleAttachments
 # not enumerable (order slips carry customer + pricing data).
 GCS_ORDER_SLIP_BUCKET = os.environ.get("GCS_ORDER_SLIP_BUCKET", "")
 GCS_ORDER_SLIP_PREFIX = os.environ.get("GCS_ORDER_SLIP_PREFIX", "order-slips/")
+GCS_PACKING_LIST_PREFIX = os.environ.get("GCS_PACKING_LIST_PREFIX", "packing-lists/")
 
 # ===========================================================================
 # Inventory sync  (Pipe17 Available -> HubSpot product properties)
