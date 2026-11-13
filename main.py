@@ -17,6 +17,7 @@ from config import (
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS, O_ORDER_DETAILS,
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH, SHIP_DETAILS_LINK,
+    F_PIPE17_REQUEST_LINK,
     WRITEBACK_DEAL_ON_APPROVAL, HS_ADVANCE_DEAL_STAGE, HUBSPOT_TOKEN, HS_ORDERED_STAGE_ID,
     HS_ORDER_DETAILS_PROP, HS_DEAL_ID_CUSTOM_FIELD, PIPE17_ORDER_PREFIX_MAP,
     PACKING_LIST_STATUSES, SHIPMENT_NUMBER_NAME, F_LINE_ITEMS, F_STATUS, SHIP_STATUS_RANK,
@@ -260,14 +261,18 @@ def _link_existing_packing_list(record_id, num, fields):
 
 
 def backfill_shipment_links(dry_run):
-    """One-time, idempotent: every Shipments row with a Shipment Details file and an
-    empty Shipment Details Link gets the file published and its link written."""
+    """One-time, idempotent: every Pipe17-created Shipments row (Pipe17 Request Link set)
+    with a Shipment Details file and an empty Shipment Details Link gets the file
+    published and its link written. Pre-Pipe17 rows are left alone: their links came
+    from the old Drive flow, and publishing years of packing lists is not wanted."""
     # Filtered here, not by formula: formulas need field names, and the sync only keys on
     # field IDs (a renamed column must not silently empty the backfill).
     rows = at.list_records(SHIPMENTS_TABLE, "TRUE()",
                            field_ids=[SHIPMENT_NUMBER_FIELD, SHIP_PACKING_LIST_ATTACH,
-                                      SHIP_DETAILS_LINK])
-    records = [r for r in rows if (r.get("fields") or {}).get(SHIP_PACKING_LIST_ATTACH)
+                                      SHIP_DETAILS_LINK, F_PIPE17_REQUEST_LINK])
+    records = [r for r in rows
+               if (r.get("fields") or {}).get(F_PIPE17_REQUEST_LINK)
+               and (r.get("fields") or {}).get(SHIP_PACKING_LIST_ATTACH)
                and not (r.get("fields") or {}).get(SHIP_DETAILS_LINK)]
     log.info("Shipment link backfill: %d of %d rows have a file and no link",
              len(records), len(rows))

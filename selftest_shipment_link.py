@@ -5,7 +5,7 @@ Run: PIPE17_API_KEY=x AIRTABLE_API_KEY=x HUBSPOT_TOKEN=x python3 selftest_shipme
 """
 import main
 from config import (SHIP_PACKING_LIST_ATTACH as FILE, SHIP_DETAILS_LINK as LINK,
-                    SHIPMENT_NUMBER_FIELD as NUM, F_LINE_ITEMS)
+                    SHIPMENT_NUMBER_FIELD as NUM, F_LINE_ITEMS, F_PIPE17_REQUEST_LINK as P17)
 
 passed = failed = 0
 
@@ -93,12 +93,15 @@ check("upload failure: file still attached, no link", calls["attached"] and not 
 # One-off backfill: only rows with a file and no link.
 reset()
 main.at.list_records = lambda t, formula, field_ids=None: [
-    {"id": "r1", "fields": {NUM: "#A", FILE: ATT}},                     # needs link
-    {"id": "r2", "fields": {NUM: "#B", FILE: ATT, LINK: "https://x"}},  # done
-    {"id": "r3", "fields": {NUM: "#C"}},                                # no file
+    {"id": "r1", "fields": {NUM: "#A", FILE: ATT, P17: "https://p17"}},                     # needs link
+    {"id": "r2", "fields": {NUM: "#B", FILE: ATT, LINK: "https://x", P17: "https://p17"}},  # done
+    {"id": "r3", "fields": {NUM: "#C", P17: "https://p17"}},                                # no file
+    {"id": "r4", "fields": {NUM: "#BE15511(9)", FILE: ATT}},                                # pre-Pipe17
 ]
 w, f = main.backfill_shipment_links(dry_run=False)
-check("backfill: only the file-without-link row written", (w, f) == (1, 0) and len(links_written()) == 1)
+check("backfill: only the Pipe17 file-without-link row written",
+      (w, f) == (1, 0) and len(links_written()) == 1)
+check("backfill: pre-Pipe17 row untouched", calls["downloaded"] == [ATT[0]["url"]])
 reset()
 w, f = main.backfill_shipment_links(dry_run=True)
 check("backfill dry run: no writes", not calls["updates"] and not calls["uploaded"])
