@@ -62,6 +62,12 @@ def _num(v):
         return None
 
 
+def _money(v):
+    """A monetary value as a 2dp float (missing/blank -> 0.0), for stable comparison."""
+    n = _num(v)
+    return round(float(n), 2) if n is not None else 0.0
+
+
 # --- pure helpers (unit-tested offline) ------------------------------------
 
 def classify(deal):
@@ -195,6 +201,12 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
         same_lines = sig_existing == sig_body
         same_tags = not tags_differ(existing.get("tags"), desired)
         same_status = str(existing.get("status") or "") == PIPE17_RFF_STATUS
+        # Tax: the deal's b2b_deal_tax lands on the order as orderTax and rolls into
+        # totalPrice (build_order already set both). Resend the price trio when tax or the
+        # line set changes, so a held order's total stays correct as tax is populated or
+        # revised by the external workflow before the order is released.
+        tax_changed = _money(existing.get("orderTax")) != _money(body.get("orderTax"))
+        pricing_changed = tax_changed or not same_lines
         # On the Ready-for-Ops flip (confirmed), clear our "DO NOT RELEASE" note so a
         # released order never carries it. Only touch it when it's actually present.
         existing_note = existing.get(PIPE17_HOLD_NOTE_FIELD) or ""
@@ -209,11 +221,11 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
         if not same_tags and _DEBUG:
             log.info("[DEBUG] %s tag change: existing=%s desired=%s",
                      ext, existing.get("tags"), desired)
-        if same_lines and same_tags and same_status and not note_change:
+        if same_lines and same_tags and same_status and not note_change and not tax_changed:
             return "unchanged", ext
         if dry_run:
-            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s status_changed=%s note_cleared=%s)",
-                     action, ext, not same_lines, not same_tags, not same_status, note_change)
+            log.info("[DRY_RUN] %s: would UPDATE %s (lines_changed=%s tags_changed=%s status_changed=%s note_cleared=%s tax_changed=%s)",
+                     action, ext, not same_lines, not same_tags, not same_status, note_change, tax_changed)
             return "would_update", ext
         # Minimal PUT: only the fields we own. Leave shippingAddress / customer alone so
         # Ops edits survive. lineItems only when changed; note only cleared on release.
@@ -224,6 +236,12 @@ def reconcile_deal(deal, *, hs, p17w, key_map, dry_run, order_suffix=""):
             update_body["customFields"] = body.get("customFields")
         if note_change:
             update_body[PIPE17_HOLD_NOTE_FIELD] = new_note   # "" clears the note
+        if pricing_changed:
+            # Keep subtotal / tax / total coherent. orderTax defaults to 0 so a cleared
+            # b2b_deal_tax zeroes the order's tax rather than leaving a stale value.
+            update_body["subTotalPrice"] = body.get("subTotalPrice")
+            update_body["totalPrice"] = body.get("totalPrice")
+            update_body["orderTax"] = body.get("orderTax", 0)
         p17w.update_order(oid, update_body, api_key)
         hs.set_pipe17_order_id(deal_id, str(oid))
         # Sales-Ops alert on the held -> Ready for Ops flip (an order that WAS a hold and

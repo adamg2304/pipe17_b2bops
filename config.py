@@ -205,7 +205,9 @@ HS_DEAL_PIPELINE_ID = os.environ.get("HS_DEAL_PIPELINE_ID", "")
 HS_PIPE17_ORDER_ID_PROP = os.environ.get("HS_PIPE17_ORDER_ID_PROP", "pipe17_order_id")
 HS_ORDER_NUMBER_PROP = os.environ.get("HS_ORDER_NUMBER_PROP", "order_number")
 HS_CURRENCY_PROP = os.environ.get("HS_CURRENCY_PROP", "deal_currency_code")
-HS_TAX_TOTAL_PROP = os.environ.get("HS_TAX_TOTAL_PROP", "committed_tax_total")
+# Deal tax (dollar amount, deal currency), populated by an external workflow. Written to
+# the Pipe17 order's orderTax and added to totalPrice. Blank -> no tax sent (orderTax omitted).
+HS_TAX_TOTAL_PROP = os.environ.get("HS_TAX_TOTAL_PROP", "b2b_deal_tax")
 HS_SHIP_ADDR_PROPS = {
     "name":    os.environ.get("HS_SHIP_NAME_PROP", "shipping_name"),
     "address": os.environ.get("HS_SHIP_ADDR_PROP", "shipping_address"),

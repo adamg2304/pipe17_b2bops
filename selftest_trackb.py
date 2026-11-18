@@ -9,6 +9,7 @@ built from the delivery contact, and CAD prefix routing.
 """
 import transform_order
 from transform_order import build_order
+from config import HS_TAX_TOTAL_PROP
 
 # Keep this test offline: stub the SKU resolver so build_order never fetches the Pipe17
 # catalog. The fake passes every SKU through unchanged (status "exact").
@@ -51,6 +52,14 @@ check("service SKU requiresShipping False", wgd["requiresShipping"] is False)
 check("subtotal from line items (233.1*25 + 1171.25 = 6998.75)", body["subTotalPrice"] == 6998.75)
 check("total = subtotal (no tax)", body["totalPrice"] == 6998.75)
 check("no orderTax when tax absent", "orderTax" not in body)
+
+# Tax from the deal's b2b_deal_tax -> orderTax, added to totalPrice.
+taxed_deal = {"id": "64737059217",
+              "properties": dict(DEAL_USD["properties"], **{HS_TAX_TOTAL_PROP: "550.25"})}
+tbody, _, _ = build_order(taxed_deal, LINE_ITEMS, CONTACT)
+check("orderTax = deal tax (550.25)", tbody.get("orderTax") == 550.25)
+check("total = subtotal + tax (6998.75 + 550.25 = 7549.0)", tbody["totalPrice"] == 7549.0)
+check("subtotal unaffected by tax (6998.75)", tbody["subTotalPrice"] == 6998.75)
 
 check("customer object built from delivery contact",
       body.get("customer", {}).get("firstName") == "Hannah"
@@ -183,6 +192,19 @@ EXISTING_HOLD = {"orderId": "O1",
                  PIPE17_HOLD_NOTE_FIELD: PIPE17_HOLD_NOTE}
 res, _, _, p17 = reconcile(deal_with(HOLD_STAGE, True), existing=EXISTING_HOLD)
 check("hold unchanged when lines+tags+note match", res == "unchanged" and not p17.updated)
+
+# UPDATE on tax change: deal gains b2b_deal_tax, existing order has none -> refresh pricing.
+taxed_hold = deal_with(HOLD_STAGE, True)
+taxed_hold["properties"][HS_TAX_TOTAL_PROP] = "500"
+res, _, _, p17 = reconcile(taxed_hold, existing=EXISTING_HOLD)
+check("hold tax change -> updated", res == "updated")
+upd = p17.updated[0][1] if p17.updated else {}
+check("tax update carries orderTax (500)", upd.get("orderTax") == 500)
+check("tax update carries totalPrice = subtotal + tax (600 + 500 = 1100)", upd.get("totalPrice") == 1100)
+check("tax update carries subTotalPrice (600)", upd.get("subTotalPrice") == 600)
+# UNCHANGED when the order already carries the same tax.
+res, _, _, p17 = reconcile(taxed_hold, existing=dict(EXISTING_HOLD, orderTax=500))
+check("hold unchanged when tax already matches", res == "unchanged" and not p17.updated)
 
 # UPDATE: deal line items changed (qty differs)
 CHANGED = dict(EXISTING_HOLD, lineItems=[{"sku": "11-03-00-50", "quantity": 1, "itemPrice": 250}])
