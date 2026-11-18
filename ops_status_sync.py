@@ -37,7 +37,7 @@ from config import (
     O_STATUS_CHANGED_NAME, PIPE17_ORDER_PREFIX_MAP,
     HS_OPS_STATUS_PROP, OPS_STATUS_ALIASES, OPS_STATUS_DATE_REJECTED,
     OPS_STATUS_SYNC_EXTRAS, HS_DELIVERY_DATE_PROP, HS_DELIVERY_FRIENDLY_PROP,
-    HS_LATESHIPMENT_PROP,
+    HS_LATESHIPMENT_PROP, HS_ORDER_DETAILS_PROP as HS_ORDER_NUMBER_PROP,
     OPS_STATUS_SKIP_ORDER_SUBSTRINGS, OPS_STATUS_SKIP_TAG_PREFIXES, OPS_STATUS_SKIP_TAGS,
 )
 
@@ -161,6 +161,24 @@ def is_main_order(fields):
     return bool(num) and "-" not in num and "(" not in num
 
 
+def main_order_number(fields):
+    """The parent order number, as the Orders "Main Order Number" formula computes it:
+    everything before the first "(" or "-", trimmed ("#BE15399 - Privacy Panels" ->
+    "#BE15399")."""
+    num = _text(fields.get(O_ORDER_NUMBER))
+    cut = min([i for i in (num.find("("), num.find("-")) if i >= 0] or [len(num)])
+    return num[:cut].strip()
+
+
+def order_number_candidates(fields):
+    """Values to look up on the deal's Shopify Order Number (order_details): the main
+    order number, plus a '#'-prefixed variant when Airtable dropped the '#'."""
+    main = main_order_number(fields)
+    if not main:
+        return []
+    return [main] if main.startswith("#") else [main, "#" + main]
+
+
 # --- run --------------------------------------------------------------------
 
 def window_formula(minutes):
@@ -181,22 +199,44 @@ def run(lookback_minutes, dry_run, *, at=None, hs=None):
     def bump(k):
         counts[k] = counts.get(k, 0) + 1
 
+    # Resolve each order to a deal. Rows with no deal id on the Airtable side (older
+    # Shopify-era orders, splits, replacements) fall back to the old zap's lookup: the
+    # deal whose Shopify Order Number (order_details) equals the main order number.
+    resolved, missing = [], []
+    for rec in rows:
+        f = rec.get("fields") or {}
+        if skip_reason(f):
+            bump("skipped")
+            continue
+        deal_id = deal_id_of(f)
+        (resolved if deal_id else missing).append((deal_id, f))
+    if missing:
+        wanted = {c for _, f in missing for c in order_number_candidates(f)}
+        try:
+            by_number = hs.find_deal_ids_by_property(HS_ORDER_NUMBER_PROP, wanted) if wanted else {}
+        except Exception:
+            log.exception("Ops status: deal lookup by %s failed", HS_ORDER_NUMBER_PROP)
+            by_number = {}
+        unresolved = []
+        for _, f in missing:
+            deal_id = next((by_number[c] for c in order_number_candidates(f) if c in by_number), None)
+            if deal_id:
+                bump("found_by_order_number")
+                resolved.append((deal_id, f))
+            else:
+                unresolved.append(_text(f.get(O_ORDER_NUMBER)))
+        if unresolved:
+            counts["no_deal_id"] = len(unresolved)
+            sample = ", ".join(unresolved[:15]) + (f" (+{len(unresolved) - 15} more)" if len(unresolved) > 15 else "")
+            log.warning("Ops status: %d order(s) with no HubSpot deal found, skipped: %s",
+                        len(unresolved), sample)
+
     # One target per deal. Split orders share their parent's deal; when both changed in
     # the window, the parent row wins so a child can't overwrite the parent's status.
     plan = {}
     unmapped = set()
-    for rec in rows:
-        f = rec.get("fields") or {}
+    for deal_id, f in resolved:
         num = _text(f.get(O_ORDER_NUMBER))
-        reason = skip_reason(f)
-        if reason:
-            bump("skipped")
-            continue
-        deal_id = deal_id_of(f)
-        if not deal_id:
-            bump("no_deal_id")
-            log.warning("Ops status: no HubSpot deal id for order %s", num)
-            continue
         want = desired_props(f, options)
         if HS_OPS_STATUS_PROP not in want:
             unmapped.add(_text(f.get(O_STATUS)))
@@ -213,10 +253,11 @@ def run(lookback_minutes, dry_run, *, at=None, hs=None):
 
     props = sorted({k for _, _, want in plan.values() for k in want})
     current = hs.batch_read_deals(list(plan), props) if plan else {}
+    not_found = []
     for deal_id, (num, _, want) in plan.items():
         if deal_id not in current:
             bump("deal_not_found")
-            log.warning("Ops status: deal %s (order %s) not found in HubSpot", deal_id, num)
+            not_found.append(f"{num} ({deal_id})")
             continue
         diff = changes(want, current[deal_id])
         if not diff:
@@ -233,6 +274,9 @@ def run(lookback_minutes, dry_run, *, at=None, hs=None):
         except Exception:
             bump("failed")
             log.exception("Ops status: update failed for deal %s (order %s)", deal_id, num)
+    if not_found:
+        log.warning("Ops status: %d deal id(s) not found in HubSpot: %s",
+                    len(not_found), ", ".join(not_found[:15]))
     log.info("Ops status sync (%s, %d orders in window): %s",
              "DRY_RUN" if dry_run else "LIVE", len(rows), counts)
     return counts

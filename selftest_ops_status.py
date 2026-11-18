@@ -92,6 +92,11 @@ check("only changed props returned",
       ops.changes(want, dict(want, operations_status="Order Arrived")) == {"operations_status": "Order Scheduled"})
 
 
+print("4b) main order number (for the order_details fallback)")
+check("split suffix stripped", ops.main_order_number({O_ORDER_NUMBER: "#BE15399 - Privacy Panels"}) == "#BE15399")
+check("paren suffix stripped", ops.main_order_number({O_ORDER_NUMBER: "#CEN1678 (2)- ergo chairs"}) == "#CEN1678")
+check("missing # gets a variant", ops.order_number_candidates({O_ORDER_NUMBER: "BE15620"}) == ["BE15620", "#BE15620"])
+
 print("5) run(): batch read, diff, patch")
 
 
@@ -113,6 +118,10 @@ class FakeHS:
     def get_property_options(self, obj, prop):
         return OPTIONS
 
+    def find_deal_ids_by_property(self, prop, values):
+        self.searched = (prop, set(values))
+        return {"#BE15399": "62610815635", "#CEN1687": "62408988317"}
+
     def batch_read_deals(self, ids, props):
         return {i: dict(self.deals[i]) for i in ids if i in self.deals}
 
@@ -129,10 +138,13 @@ rows = [
     {"id": "r6", "fields": {O_ORDER_NUMBER: "#BE100000000600", O_STATUS: "Order Scheduled"}},         # parent
     {"id": "r7", "fields": {O_ORDER_NUMBER: "#BE100000000600-2", O_STATUS: "Order Processing",
                             O_HS_DEAL_ID_LOOKUP: ["100000000600"]}},                                 # child, same deal
+    {"id": "r8", "fields": {O_ORDER_NUMBER: "#BE15399 - Privacy Panels", O_STATUS: "Order Shipped"}},  # found by order_details
+    {"id": "r9", "fields": {O_ORDER_NUMBER: "#BE15000", O_STATUS: "Order Shipped"}},                  # not found anywhere
 ]
 hs = FakeHS({"100000000100": {"operations_status": "Order Processing"},
              "100000000200": {"operations_status": "Order Arrived"},
-             "100000000400": {}, "100000000600": {"operations_status": "Order Arrived"}})
+             "100000000400": {}, "100000000600": {"operations_status": "Order Arrived"},
+             "62610815635": {"operations_status": "Order Processing"}})
 fat = FakeAT(rows)
 counts = ops.run(90, dry_run=False, at=fat, hs=hs)
 check("window formula uses Last Modified", "{Last Modified}" in fat.formula and "-90" in fat.formula)
@@ -143,7 +155,12 @@ check("unmapped status counted, not written", counts.get("unmapped") == 1 and al
 check("missing deal counted", counts.get("deal_not_found") == 1)
 check("parent order wins over its split child",
       ("100000000600", {"operations_status": "Order Scheduled"}) in hs.updates)
-check("exactly two writes", len(hs.updates) == 2)
+check("deal without Airtable id found by its order number",
+      ("62610815635", {"operations_status": "Order Shipped"}) in hs.updates)
+check("searched order_details with main order numbers",
+      hs.searched[0] == "order_details" and {"#BE15399", "#BE15000"} <= hs.searched[1])
+check("unfound order counted once", counts.get("no_deal_id") == 1)
+check("exactly three writes", len(hs.updates) == 3)
 
 hs2 = FakeHS({"100000000100": {"operations_status": "Order Processing"}})
 dry = ops.run(90, dry_run=True, at=FakeAT(rows[:1]), hs=hs2)
