@@ -38,3 +38,4 @@ jobs:
           python selftest_shipment_gate.py
           python selftest_inventory_freshness.py
           python selftest_shipment_link.py
+          python selftest_ops_status.py

@@ -26,7 +26,7 @@ import datetime as dt
 import logging
 import sys
 
-from config import RECONCILE_LOOKBACK_DAYS, PIPE17_TAG_FILTER, DRY_RUN
+from config import RECONCILE_LOOKBACK_DAYS, PIPE17_TAG_FILTER, DRY_RUN, SYNC_OPS_STATUS
 import main as sync
 import notify
 import inventory_freshness
@@ -67,8 +67,24 @@ def main():
                f"in Airtable over the last {RECONCILE_LOOKBACK_DAYS}d.")
         log.info(msg)
     notify.slack(msg)
+    _sweep_ops_status()
     _check_inventory_freshness()
     log.info("Reconcile complete.")
+
+
+def _sweep_ops_status():
+    """Wide-window pass of the Airtable Status -> HubSpot operations_status push, so a
+    status change a frequent run missed still lands. Diff-based; alerts only on failures."""
+    if not SYNC_OPS_STATUS:
+        return
+    try:
+        counts = sync.ops_status_sync.run(RECONCILE_LOOKBACK_DAYS * 24 * 60, DRY_RUN)
+    except Exception as e:
+        log.exception("Ops status sweep failed")
+        notify.slack(f":warning: Airtable -> HubSpot operations_status sweep failed: {e}")
+        return
+    if counts.get("failed") or counts.get("deal_not_found"):
+        notify.slack(f":warning: operations_status sweep: {counts}")
 
 
 def _check_inventory_freshness():

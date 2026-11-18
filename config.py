@@ -547,3 +547,87 @@ PARCEL_SKIP_FULFILLMENT_STATUSES = {
         "PARCEL_SKIP_FULFILLMENT_STATUSES",
         "cancelled,canceled,failed,rejected,voided"
     ).split(",") if s.strip()}
+
+# ===========================================================================
+# Operations Pipeline retirement (replaces two Zapier zaps)
+# ===========================================================================
+# 1) "Sync HubSpot Deals with Airtable Records": a deal committed to Pipe17 (its order
+#    reaches Track A with the Airtable tag) gets a row in the Airtable "Hubspot Deals"
+#    table, linked to its Orders row. Track A owns this now, off the Pipe17 order, so it
+#    no longer depends on the deal entering the Operations Pipeline.
+# 2) "Catch Airtable Order Updates and Push to Hubspot": an Airtable Orders Status change
+#    lands on the deal's operations_status property (instead of moving the deal through
+#    Operations Pipeline stages). Track A polls Orders whose Status changed in the window;
+#    the daily reconcile sweeps a wider window so a missed run self-heals.
+
+# --- (1) Hubspot Deals table -------------------------------------------------
+SYNC_HS_DEALS_TABLE = os.environ.get("SYNC_HS_DEALS_TABLE", "false").lower() == "true"
+HS_DEALS_TABLE = os.environ.get("HS_DEALS_TABLE", "tblGygaYG3Quyf9QV")
+HD_DEAL_NAME = "fldDX73iavo3a2q9a"         # Deal Name (primary)
+HD_DEAL_ID = "fldw2JR1Yq57OgOMf"           # Hubspot Deal ID
+HD_ORDER_NUMBER = "fldk362E6NyTS5i8U"      # Shopify Order Number (= Pipe17 extOrderId)
+HD_INVOICE_NUMBER = "fldJwte4iKs32RBDj"    # Invoice Number
+HD_ORDER_LINK = "fldxBQWKygrvJ8dId"        # Hubspot > Order (link to Orders)
+HD_DEAL_LINK = "fldKtSekd9CbOggpr"         # Hubspot Deal Link (url)
+HD_COMPANY = "fldba0t0qaWo2JJUu"           # Company
+HD_CONTACT = "fld77Q7zb82SLi45r"           # Contact (name)
+HD_CONTACT_EMAIL = "fld0cgeo3wjwDpXcL"     # Contact Email
+HD_DELIVERY_TYPE = "fldVYX4CCrIcn6854"     # Delivery Type (singleSelect)
+HD_REGULAR_HOURS = "fldwJhBvdNSUDaKGq"     # Regular Hours Delivery? (text)
+HD_STAIR_CARRY = "fldlVg9Ezkt5fPYB8"       # Stair Carry (singleSelect)
+HD_UNION_BUILDING = "fldOtsD2qlUTAEiAH"    # Union Building (singleSelect)
+HD_COI_REQUIRED = "fldar3uxUNWUH3dlq"      # COI Required (singleSelect)
+HD_FLOORPLAN = "fldLi7mmOdFl7qjFG"         # Floorplan (attachments)
+HD_SALES_CONTACT = "fldxtENVbBHQu0m2x"     # Sales Contact (deal owner name)
+HD_SALES_CONTACT_EMAIL = "fldTmAWW7jfMjkx9l"  # Sales Contact Email
+HD_STAKEHOLDER = "fldrr5UkeQYthw4ta"       # Stakeholder Type (singleSelect)
+HD_DEAL_ID_NAME = os.environ.get("HD_DEAL_ID_NAME", "Hubspot Deal ID")  # NAME for filterByFormula
+# Deal properties read for the row (the same set the zap read).
+HS_DEALS_TABLE_PROPS = (
+    "dealname", "hubspot_owner_id", "invoice_number", "deal_stakeholder", "floorplan",
+    "delivery_contact_email", "delivery_type", "regular_hour_delivery", "stair_carry",
+    "union_building_", "coi_required_",
+)
+
+# --- (2) Airtable Orders Status -> HubSpot operations_status ----------------
+SYNC_OPS_STATUS = os.environ.get("SYNC_OPS_STATUS", "false").lower() == "true"
+HS_OPS_STATUS_PROP = os.environ.get("HS_OPS_STATUS_PROP", "operations_status")
+OPS_STATUS_LOOKBACK_MINUTES = int(os.environ.get("OPS_STATUS_LOOKBACK_MINUTES", "90"))
+# Orders "Last Modified" (lastModifiedTime) watches Status (plus two minor fields), so it
+# is the Status-changed-at timestamp the poll windows on. NAME, for filterByFormula.
+O_STATUS_CHANGED_NAME = os.environ.get("O_STATUS_CHANGED_NAME", "Last Modified")
+O_HS_DEAL_ID_LOOKUP = "fldQtkIIvpenztS63"    # Hubspot Deal ID (from Hubspot Test) lookup
+O_DELIVERY_DATE_APPROVED = "fldcko8toARVJrsri"  # Delivery Date Approved (singleSelect)
+O_SCHEDULED_DELIVERY_DATE = "fldp5IYAFy0WkyUK7"  # Scheduled Delivery Date (date)
+O_SCHEDULED_DELIVERY_FRIENDLY = "fldS7fp9AfqSN4dym"  # Scheduled Delivery Date (Friendly)
+O_LATESHIPMENT_LINK = "fldAntVJqAzpjgeTA"    # Late Shipment Tracking Page Link
+O_COMPLETED_DATE = "fldmKv7afIT0bBNRl"       # Completed (date)
+# Airtable Status -> operations_status, for Airtable statuses whose name is not itself a
+# HubSpot option. Any Airtable status that matches a live operations_status option
+# (case-insensitive) is written as-is, so adding an option in HubSpot needs no code change.
+# Statuses that match neither leave operations_status untouched and are logged.
+# Override with OPS_STATUS_ALIASES='{"Airtable name": "HubSpot value", ...}'.
+OPS_STATUS_ALIASES = {"Canceled": "Order Canceled"}
+if os.environ.get("OPS_STATUS_ALIASES"):
+    import json as _json
+    OPS_STATUS_ALIASES = _json.loads(os.environ["OPS_STATUS_ALIASES"])
+# A rejected delivery date is reported as this status (the old zap moved the deal to a
+# "Delivery Date Rejected" stage). Written only if HubSpot has the option.
+OPS_STATUS_DATE_REJECTED = os.environ.get("OPS_STATUS_DATE_REJECTED", "Delivery Date Rejected")
+# Also carry the delivery fields the zap set alongside the stage. Only non-empty Airtable
+# values are written, and only when they differ from the deal.
+OPS_STATUS_SYNC_EXTRAS = os.environ.get("OPS_STATUS_SYNC_EXTRAS", "true").lower() == "true"
+HS_DELIVERY_DATE_PROP = os.environ.get("HS_DELIVERY_DATE_PROP", "delivery_date")
+HS_DELIVERY_FRIENDLY_PROP = os.environ.get(
+    "HS_DELIVERY_FRIENDLY_PROP", "scheduled_delivery_date_and_time__friendly_")
+HS_LATESHIPMENT_PROP = os.environ.get("HS_LATESHIPMENT_PROP", "lateshipment_tracking_link")
+# Orders the old Airtable automation never sent to HubSpot: test numbers and
+# duplicate / replacement / claim orders. Same rules here.
+OPS_STATUS_SKIP_ORDER_SUBSTRINGS = tuple(
+    s for s in os.environ.get("OPS_STATUS_SKIP_ORDER_SUBSTRINGS", "#77,#99").split(",") if s)
+OPS_STATUS_SKIP_TAG_PREFIXES = tuple(
+    s.strip().upper() for s in os.environ.get(
+        "OPS_STATUS_SKIP_TAG_PREFIXES", "DUPLICATE,REPLACEMENT").split(",") if s.strip())
+OPS_STATUS_SKIP_TAGS = tuple(
+    s.strip().upper() for s in os.environ.get(
+        "OPS_STATUS_SKIP_TAGS", "MISSING,DAMAGE-TRANSIT,CS-CANCEL").split(",") if s.strip())

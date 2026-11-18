@@ -24,6 +24,7 @@ from config import (
     O_INVENTORY_STATE, O_EXCEPTION_FLAG,
     INVENTORY_STATE_NAME, STATUS_FIELD_NAME, PIPE17_ORDER_ID_NAME,
     RECOVERY_DONE_STATUSES, INV_AWAITING, INV_PARTIALLY_OOS,
+    SYNC_HS_DEALS_TABLE, SYNC_OPS_STATUS, OPS_STATUS_LOOKBACK_MINUTES,
 )
 import pipe17_client as p17
 import airtable_client as at
@@ -35,6 +36,8 @@ import shipment_gate
 import docs_render
 import airtable_attach
 import gcs_upload
+import hubspot_deals_table
+import ops_status_sync
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("pipe17-airtable")
@@ -73,6 +76,8 @@ def sync_orders(since, tag):
         log.info("DRY_RUN: not writing %d orders. Sample:", len(orders))
         for f in orders[:5]:
             log.info("  %s", f)
+        if SYNC_HS_DEALS_TABLE:
+            _sync_hubspot_deals_table([], raw_by_num)
     elif orders:
         created, updated, records = at.upsert(ORDERS_TABLE, orders, [ORDER_MERGE_FIELD])
         log.info("Orders upserted: %d created, %d updated", created, updated)
@@ -80,7 +85,24 @@ def sync_orders(since, tag):
             _generate_order_slips(records, raw_by_num)
         if WRITEBACK_DEAL_ON_APPROVAL:
             _writeback_deals(new_orders)
+        if SYNC_HS_DEALS_TABLE:
+            _sync_hubspot_deals_table(records, raw_by_num)
     return created_numbers
+
+
+def _sync_hubspot_deals_table(records, raw_by_num):
+    """Every order Track A writes is a deal committed to Pipe17: make sure the deal has a
+    row in the Airtable Hubspot Deals table, linked to this Orders row (replaces the
+    Operations Pipeline zap). Idempotent; never blocks the sync."""
+    if not HUBSPOT_TOKEN:
+        log.warning("Hubspot Deals table skipped: HUBSPOT_TOKEN not set on this job.")
+        return
+    rec_by_num = {(r.get("fields") or {}).get(O_ORDER_NUMBER): r.get("id") for r in records}
+    items = [(_hubspot_deal_id(o), num, rec_by_num.get(num)) for num, o in raw_by_num.items()]
+    try:
+        hubspot_deals_table.ensure_rows(items, hs=hs, at=at, dry_run=DRY_RUN)
+    except Exception:
+        log.exception("Hubspot Deals table step failed (continuing)")
 
 
 def _generate_order_slips(records, raw_by_num):
@@ -522,6 +544,14 @@ def main():
         backfill_inventory_state(DRY_RUN)
         return
 
+    # Ops-status backfill: push Airtable Status for every order whose Status changed in
+    # the window (widen with --lookback-min). Diff-based, so safe to re-run.
+    if "--backfill-ops-status" in sys.argv:
+        dry = DRY_RUN or "--dry-run" in sys.argv
+        log.info("Mode: ops-status backfill | DRY_RUN=%s", dry)
+        ops_status_sync.run(_lookback_minutes(), dry)
+        return
+
     minutes = _lookback_minutes()
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)).isoformat()
     tag = PIPE17_TAG_FILTER.strip()
@@ -544,6 +574,14 @@ def main():
         recovery_pass(DRY_RUN)
     except Exception:
         log.exception("Inventory recovery pass failed (continuing)")
+
+    # Airtable Orders Status -> HubSpot deal operations_status (replaces the Operations
+    # Pipeline zap). Reads Airtable, writes HubSpot only. Never fails the sync.
+    if SYNC_OPS_STATUS:
+        try:
+            ops_status_sync.run(OPS_STATUS_LOOKBACK_MINUTES, DRY_RUN)
+        except Exception:
+            log.exception("Ops status sync failed (continuing)")
 
     log.info("Sync complete.")
 

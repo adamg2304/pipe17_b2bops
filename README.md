@@ -33,6 +33,11 @@ A row with a file but no link gets the attached file published on its next sync.
 backfill every such Pipe17-created row at once, run the `pipe17-airtable-sync` job from the **Run job**
 workflow with args `main.py,--backfill-shipment-links`. It is idempotent.
 
+### Operations Pipeline replacement
+Track A also creates the Airtable **Hubspot Deals** row for each committed deal and pushes
+Airtable order **Status** to the deal's `operations_status` property (replacing two Zapier
+zaps and the HubSpot Operations Pipeline). Details and go-live steps: `DEPLOY.md`.
+
 ## Track B — HubSpot -> Pipe17 (`main_hubspot_to_pipe17.py`)
 Poller Job. Finds deposit-paid deals (stage `10492961`) without a `pipe17_order_id`,
 builds a Pipe17 **draft** order, and creates it with the currency-appropriate key (USD ->
