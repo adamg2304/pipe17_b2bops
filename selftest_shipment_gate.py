@@ -107,5 +107,16 @@ w, u = run([sent], [sent], row_bo)
 check("sent SR updates Origin WH to the real warehouse", w[0].get(F_ORIGIN_WH) == LOCS[MTO])
 check("sent SR gets Shipment Details", any("attached" in x for x in u))
 
+# canceledRestock on a row of its own (no live sibling): row goes to Cancelled.
+# (#BE65204397939 sat at In Review after its SR was canceled with restock.)
+CANCELED_ALONE = sr("575d", "canceledRestock", MTO, 5, "2026-11-17T15:08:05Z",
+                    "2026-11-17T23:54:35Z", num="#BE65204397939")
+w, u = run([CANCELED_ALONE], [CANCELED_ALONE], {F_STATUS: "In Review"})
+check("canceledRestock SR -> Cancelled", w and w[0].get(F_STATUS) == "Cancelled")
+
+# canceledRestock that reused a live SR's number: live SR keeps the row, no Cancelled.
+w, u = run([DUP], [LIVE, DUP], ROW)
+check("canceledRestock dup does not cancel the live row", w and w[0].get(F_STATUS) != "Cancelled")
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

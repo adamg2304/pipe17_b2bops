@@ -90,6 +90,10 @@ STATUS_MAP = {
     "inTransit": "In-Transit",
     "delivered": "Arrived",
     "canceled": "Cancelled",
+    # Canceled with inventory put back. Pipe17 uses this for most ops cancels; it was
+    # unmapped, so the row kept "In Review"/"Processing". Safe for reused shipment
+    # numbers: shipment_gate lets a live SR with the same number own the row.
+    "canceledRestock": "Cancelled",
     "returned": "Cancelled",
 }
 DEFAULT_SHIPMENT_STATUS = None
