@@ -215,6 +215,60 @@ gcloud scheduler jobs create http pipe17-parcel-tracking-schedule \
 
 (Mirror the other schedulers' `--oidc-*` flags if they use those instead of `--oauth-*`.)
 
+## Retiring the HubSpot Operations Pipeline (replaces two zaps)
+
+Two Track A steps replace the Zapier zaps that depended on the Operations Pipeline. Both
+run inside `pipe17-airtable-sync` (every run) and `pipe17-airtable-sync-reconcile` (daily,
+14-day window), switched on by `SYNC_HS_DEALS_TABLE=true` and `SYNC_OPS_STATUS=true` in
+`deploy-cloud-run.yml`.
+
+**1. Committed deals → Airtable "Hubspot Deals"** (`hubspot_deals_table.py`, replaces
+"Sync HubSpot Deals with Airtable Records"). Every order Track A writes to Airtable Orders
+is a deal committed to Pipe17. The deal gets one row in Hubspot Deals (`tblGygaYG3Quyf9QV`)
+with the zap's fields, linked to its Orders row. The table is checked by Hubspot Deal ID
+first, so the duplicate rows the zap made stop. An existing row is never rewritten; only
+a missing Orders link is filled. The deal link now uses the portal id (the zap put a
+contact id there).
+
+**2. Airtable order Status → deal `operations_status`** (`ops_status_sync.py`, replaces
+"Catch Airtable Order Updates and Push to Hubspot" and the Airtable automation
+"Sync Order Status Update to Hubspot" that fed it). Each run reads Orders whose Status
+changed in the last `OPS_STATUS_LOOKBACK_MINUTES` (the Orders "Last Modified" field watches
+Status), and PATCHes only what differs on the deal: `operations_status`, plus
+`delivery_date`, the friendly scheduled date and the LateShipment link when Airtable has
+them. Same exclusions as the old automation: `#77` / `#99` orders and
+DUPLICATE / Replacement / MISSING / DAMAGE-TRANSIT / CS-CANCEL tags. The deal stage is
+never touched. Deal id comes from the Hubspot Deals lookup, then the Hubspot Deal Link,
+then the `#BE` / `#CEN` order number.
+
+Statuses are written as-is when they match an `operations_status` option. These Airtable
+statuses have no HubSpot option yet, so they leave the deal unchanged and are logged:
+`Order Partially Out of Stock`, `Order Scheduling Email Sent`, `Order Partially Scheduled`,
+`Delivery Date Rejected` (also used when Delivery Date Approved = Rejected),
+`Delivered with Open Items`, `QA`, `Order Partially Cancelled`. Add the option in HubSpot
+with the same label and it syncs on the next run, no deploy needed. `Canceled` maps to
+`Order Canceled` (`OPS_STATUS_ALIASES` holds other aliases).
+
+### Go-live
+
+1. Merge to `main` (auto-deploys Track A + reconcile with both flags on).
+2. Turn **off** in Zapier: "Sync HubSpot Deals with Airtable Records" and
+   "Catch Airtable Order Updates and Push to Hubspot". Turn **off** the Airtable automation
+   "Sync Order Status Update to Hubspot" (it only posts to the Zapier hook). Leave
+   "Hubspot > Airtable Order Connector" on; it links new Hubspot Deals rows to orders and
+   is harmless alongside the sync's own link.
+3. Backfill `operations_status` for open orders (dry run first; the window is minutes of
+   Status changes, 129600 = 90 days). **Actions → Run Cloud Run Job →
+   `pipe17-airtable-sync`**, args:
+   `main.py,--backfill-ops-status,--lookback-min,129600,--dry-run` and check the logged
+   would-updates, then run it again without `,--dry-run`.
+4. Repoint any HubSpot views, reports, workflows or emails that key on Operations Pipeline
+   stages to `operations_status`, then archive the pipeline.
+
+The HubSpot token needs read access to deals, contacts, companies and owners, and write
+access to deals (all already used by Track A / B except companies + owners; a missing scope
+only blanks the Company or Sales Contact cell).
+
 ## The catalog-scoped Pipe17 key (`pipe17-catalog-key`)
 
 The B2B **order-channel** keys (`pipe17-api-key-us` / `-ca`) are only authorized for

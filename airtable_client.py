@@ -89,3 +89,13 @@ def upsert(table, records, merge_fields, typecast=True):
         updated += len(data.get("updatedRecords", []))
         out.extend(data.get("records", []))
     return created, updated, out
+
+
+def create_record(table, fields, typecast=True):
+    """Create one record (fields keyed by field ID); returns the created record."""
+    url = f"{BASE}/{table}"
+    resp = requests.post(url, headers=HEADERS,
+                         json={"fields": fields, "typecast": typecast,
+                               "returnFieldsByFieldId": True}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()

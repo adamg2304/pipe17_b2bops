@@ -193,3 +193,59 @@ def set_pipe17_order_id(deal_id, pipe17_order_id):
 def update_deal(deal_id, properties):
     """PATCH arbitrary properties onto a deal (e.g. dealstage + Pipe17 order number)."""
     _request("PATCH", f"/crm/v3/objects/deals/{deal_id}", json={"properties": properties})
+
+
+# --- Helpers for the Operations Pipeline retirement (Hubspot Deals table + ops status) ---
+
+def get_deal_props(deal_id, properties):
+    """One deal with an explicit property list -> its properties dict."""
+    data = _request("GET", f"/crm/v3/objects/deals/{deal_id}",
+                    params={"properties": list(properties)})
+    return data.get("properties") or {}
+
+
+def first_associated_id(deal_id, to_object):
+    """First associated record id of `to_object` (e.g. 'companies', 'contacts'), or None."""
+    assoc = _request("GET", f"/crm/v4/objects/deals/{deal_id}/associations/{to_object}")
+    for r in assoc.get("results", []):
+        if r.get("toObjectId"):
+            return str(r["toObjectId"])
+    return None
+
+
+def get_object_props(object_type, object_id, properties):
+    data = _request("GET", f"/crm/v3/objects/{object_type}/{object_id}",
+                    params={"properties": list(properties)})
+    return data.get("properties") or {}
+
+
+def get_owner(owner_id):
+    """Owner {firstName,lastName,email} by id (archived owners included), or {}."""
+    if not owner_id:
+        return {}
+    try:
+        return _request("GET", f"/crm/v3/owners/{owner_id}", params={"archived": "false"}) or {}
+    except requests.HTTPError as e:
+        if e.response is None or e.response.status_code != 404:
+            raise
+    # Owner left the portal: HubSpot only returns them with archived=true.
+    return _request("GET", f"/crm/v3/owners/{owner_id}", params={"archived": "true"}) or {}
+
+
+def get_property_options(object_type, prop):
+    """Enumeration option values of a property (e.g. deals.operations_status)."""
+    data = _request("GET", f"/crm/v3/properties/{object_type}/{prop}")
+    return [o.get("value") for o in data.get("options", []) if o.get("value") is not None]
+
+
+def batch_read_deals(deal_ids, properties):
+    """{deal_id: properties} for the given ids, 100 per request. Unknown ids are absent."""
+    out = {}
+    ids = [str(i) for i in deal_ids]
+    for i in range(0, len(ids), 100):
+        body = {"inputs": [{"id": d} for d in ids[i:i + 100]],
+                "properties": list(properties)}
+        data = _request("POST", "/crm/v3/objects/deals/batch/read", json=body)
+        for row in data.get("results", []):
+            out[str(row.get("id"))] = row.get("properties") or {}
+    return out
