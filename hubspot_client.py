@@ -249,3 +249,32 @@ def batch_read_deals(deal_ids, properties):
         for row in data.get("results", []):
             out[str(row.get("id"))] = row.get("properties") or {}
     return out
+
+
+def find_deal_ids_by_property(prop, values):
+    """{value: deal_id} for deals whose `prop` exactly equals one of `values` (first deal
+    wins when several match). Used to find a deal by its Shopify Order Number
+    (order_details) when Airtable has no deal id, as the old zap did."""
+    out = {}
+    vals = sorted({str(v) for v in values if v})
+    for i in range(0, len(vals), 50):
+        chunk = vals[i:i + 50]
+        after = None
+        while True:
+            body = {"filterGroups": [{"filters": [
+                        {"propertyName": prop, "operator": "IN", "values": chunk}]}],
+                    "properties": [prop], "limit": 100,
+                    "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}]}
+            if after:
+                body["after"] = after
+            data = _request("POST", "/crm/v3/objects/deals/search", json=body)
+            for row in data.get("results", []):
+                v = (row.get("properties") or {}).get(prop)
+                if v and v not in out:
+                    out[v] = str(row.get("id"))
+            after = (data.get("paging") or {}).get("next", {}).get("after")
+            if not after:
+                break
+            time.sleep(0.2)
+        time.sleep(0.2)
+    return out
