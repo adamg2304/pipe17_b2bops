@@ -44,16 +44,16 @@ F_PIPE17_REQUEST_LINK = "fldEWt9Sq7Q41vydM"   # Pipe17 Shipping Request deep lin
 # is canceled and re-routed, so it can't identify a row. Nothing matches on it alone.
 F_SHIP_REQUEST_ID = os.environ.get("F_SHIP_REQUEST_ID", "fldffkU7iYRmCfyKz")    # singleLineText
 SHIP_REQUEST_ID_NAME = os.environ.get("SHIP_REQUEST_ID_NAME", "Pipe17 Shipping Request ID")
-# Replacement sweep fields. These do not exist in the base yet: add them, then set the
-# field IDs here or in the job env. While a field ID is blank, the sweep computes and
-# logs it but does not write it (Status "Replaced" is still written).
+# Replacement sweep fields (env-overridable; set an ID to "" to stop writing that field).
 #   Replaced By — link to Shipments (on the canceled row: the live SR row(s) that took
-#                 over its lines). Replaces — link to Shipments (on the replacement row).
+#                 over its lines). Replaces — link to Shipments (on the replacement row:
+#                 the canceled row(s) it took over). Both need "Allow linking to multiple
+#                 records": a split has several replacements, a chain several canceled rows.
 #   Orphaned    — checkbox (canceled row whose lines have no live SR after the grace).
-F_REPLACED_BY = os.environ.get("F_REPLACED_BY", "")
-F_REPLACES = os.environ.get("F_REPLACES", "")
-F_ORPHANED = os.environ.get("F_ORPHANED", "")
-REPLACED_BY_NAME = os.environ.get("REPLACED_BY_NAME", "Replaced By")
+F_REPLACED_BY = os.environ.get("F_REPLACED_BY", "fldxWaMY2T0I7F02B")
+F_REPLACES = os.environ.get("F_REPLACES", "fldzEZNlEIwK3VYg9")
+F_ORPHANED = os.environ.get("F_ORPHANED", "fldxuhgm5ulvldus9")
+REPLACED_BY_NAME = os.environ.get("REPLACED_BY_NAME", "Replaced by")   # exact field name (formula)
 ORPHANED_NAME = os.environ.get("ORPHANED_NAME", "Orphaned")
 # Ops-entered Shipments fields copied from a canceled row to its replacement(s) when the
 # replacement's value is empty. Shipments has no Ops Owner or delivery-date fields (those

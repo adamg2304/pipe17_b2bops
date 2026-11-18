@@ -47,7 +47,8 @@ looks up its line `uniqueId`s on the order's live SRs created after it. Line IDs
 cancel-and-reroute, so this finds the replacement(s): a split gives several, and a chain
 (canceled twice) resolves to the newest live SR. The canceled row gets Status **Replaced**,
 **Replaced By** → the replacement row(s), and each replacement gets **Replaces** ← the
-canceled row(s). Notes and Shipment Deficiency Detail (`REPLACEMENT_COPY_FIELDS`) are
+canceled row(s) (field IDs `F_REPLACED_BY`, `F_REPLACES`, `F_ORPHANED` in config.py;
+both link fields must allow multiple records). Notes and Shipment Deficiency Detail (`REPLACEMENT_COPY_FIELDS`) are
 copied onto a replacement when its own value is empty. If a line the order still needs has
 no live SR `ORPHAN_GRACE_MINUTES` (30) after the cancel, the row stays **Cancelled**, is
 flagged **Orphaned**, and one Slack alert is sent. Every run also re-sweeps orders that
