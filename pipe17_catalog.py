@@ -23,7 +23,13 @@ from config import (
 log = logging.getLogger("pipe17-catalog")
 
 _PRODUCTS_PATH = "/products"
-_PAGE = 250
+# Page size + the field list are kept small on purpose: reading the whole catalog with
+# keys="*" at count=250 returns the full product payload (descriptions, images, bundle
+# items, every channel's published alias...) and Pipe17 answers 413 Request Entity Too
+# Large on the larger pages, which took the resolver down (fail-open -> unresolved SKUs).
+# We only need each product's own sku and its published[] aliases, so fetch just those.
+_PAGE = 100
+_KEYS = "sku,published"
 
 
 def _api_key(currency):
@@ -51,15 +57,26 @@ def _get(path, api_key, params=None, max_retries=4):
 
 def _iter_products(api_key):
     skip = 0
+    page = _PAGE
     while True:
-        data = _get(_PRODUCTS_PATH, api_key, params={"count": _PAGE, "skip": skip, "keys": "*"})
+        try:
+            data = _get(_PRODUCTS_PATH, api_key,
+                        params={"count": page, "skip": skip, "keys": _KEYS})
+        except requests.HTTPError as e:
+            # Payload still too large for this page size -> halve and retry the SAME page,
+            # so a heavy stretch of the catalog shrinks the read instead of failing open.
+            if getattr(e, "response", None) is not None and e.response.status_code == 413 and page > 10:
+                page = max(10, page // 2)
+                log.warning("Pipe17 /products returned 413; retrying at count=%s", page)
+                continue
+            raise
         items = data.get("products", [])
         for p in items:
             yield p
-        page = data.get("pagination") or {}
-        if page.get("last") is True or len(items) < _PAGE:
+        info = data.get("pagination") or {}
+        if info.get("last") is True or len(items) < page:
             break
-        skip += _PAGE
+        skip += page
 
 
 class SkuResolver:
