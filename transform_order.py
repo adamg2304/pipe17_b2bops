@@ -2,7 +2,8 @@
 
 Pricing: itemPrice = NET unit price (line net amount / qty), not list price.
 Payment: subTotalPrice = deal amount (net); totalPrice = subtotal + tax;
-orderTax = frozen tax from the deal (deferred — Shopify tax via Alex — so 0/omitted now).
+orderTax = the deal's tax (HS_TAX_TOTAL_PROP = b2b_deal_tax), set by an external workflow;
+omitted when the deal carries no tax value.
 extOrderId = <currency prefix><deal id>. No channelId — the API key selects US/CA channel.
 """
 import datetime as dt
@@ -203,7 +204,7 @@ def build_order(deal, line_items, delivery_contact=None, order_suffix="", *,
 
     # Payment. The deal "Amount" field is deliberately ignored — it's a manual field
     # that's often blank; the line items are the source of truth (matches HubSpot's
-    # TCV / Subtotal). Tax deferred (Shopify via Alex) — total = subtotal + tax.
+    # TCV / Subtotal). Tax = the deal's b2b_deal_tax (external workflow) — total = subtotal + tax.
     tax = _num(props.get(HS_TAX_TOTAL_PROP))
     if SO_RETAIL_PRICING:
         # Finance view: full retail subtotal, one order-level discount on the bottom. The
