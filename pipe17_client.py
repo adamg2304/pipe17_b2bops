@@ -118,3 +118,13 @@ def get_order_shipments(ext_order_id):
         return []
     data = _get(PIPE17_SHIPMENTS_PATH, params={"extOrderId": ext_order_id, "count": 100, "keys": "*"})
     return data.get("shipments", []) or []
+
+
+def get_shipping_request(shipment_id):
+    """One shipping request by its Pipe17 shipmentId (the Shipments upsert key), or None."""
+    if not shipment_id:
+        return None
+    data = _get(PIPE17_SHIPMENTS_PATH,
+                params={"shipmentId": shipment_id, "count": 1, "keys": "*"})
+    srs = data.get("shipments", []) or []
+    return srs[0] if srs else None

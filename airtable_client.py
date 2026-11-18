@@ -64,6 +64,50 @@ def list_records(table, formula, field_ids=None, page_size=100):
     return out
 
 
+def _formula_str(v):
+    """A value as an Airtable formula string literal (escape backslash + double quote)."""
+    return '"%s"' % str(v).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def find_records_by_values(table, field_name, field_id, values, chunk=40):
+    """({value: record}, {value: [extra record ids]}) for every record whose field equals
+    one of `values` (fields keyed by field ID). `field_name` builds the formula (formulas
+    need names); `field_id` reads the value back. Batched into OR() formulas so one
+    order's SRs cost one read. A value on several records keeps the oldest-created one
+    and reports the rest as dupes, so a duplicate key is surfaced, never silently used."""
+    vals = sorted({str(v) for v in values if v})
+    found, dupes = {}, {}
+    for i in range(0, len(vals), chunk):
+        part = vals[i:i + chunk]
+        formula = "OR(%s)" % ",".join("{%s}=%s" % (field_name, _formula_str(v)) for v in part)
+        for rec in list_records(table, formula):
+            key = (rec.get("fields") or {}).get(field_id)
+            key = str(key) if key else None
+            if key not in part:
+                continue
+            if key in found:
+                keep, other = sorted([found[key], rec], key=lambda r: r.get("createdTime") or "")
+                found[key] = keep
+                dupes.setdefault(key, []).append(other["id"])
+            else:
+                found[key] = rec
+    return found, dupes
+
+
+def update_records(table, updates, typecast=True):
+    """PATCH many records, 10 per request. `updates` is [(record_id, fields)]."""
+    url = f"{BASE}/{table}"
+    out = []
+    for i in range(0, len(updates), 10):
+        batch = updates[i:i + 10]
+        payload = {"records": [{"id": rid, "fields": f} for rid, f in batch],
+                   "typecast": typecast, "returnFieldsByFieldId": True}
+        resp = requests.patch(url, headers=HEADERS, json=payload, timeout=30)
+        resp.raise_for_status()
+        out.extend(resp.json().get("records", []))
+    return out
+
+
 def update_record(table, record_id, fields):
     """PATCH fields (keyed by field ID) onto one record — e.g. clear an attachment."""
     url = f"{BASE}/{table}/{record_id}"

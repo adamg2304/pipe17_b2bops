@@ -17,7 +17,7 @@ It never creates an Airtable row (update-only).
 from config import (
     PARCEL_CARRIERS, PARCEL_SKIP_FULFILLMENT_STATUSES,
     F_STATUS, F_PARCEL_TRACKING, SHIP_STATUS_IN_TRANSIT,
-    SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, SHIP_STATUS_RANK,
+    SHIPMENTS_TABLE, SHIP_REQUEST_ID_NAME, F_SHIPMENT_NUMBER, SHIP_STATUS_RANK,
 )
 
 
@@ -99,10 +99,11 @@ def plan_shipment_update(current_status, current_tracking, tracking_numbers):
 def reconcile(fulfillments, p17, at, *, dry_run, require_tag=None, log=None):
     """Drive fulfillments -> Airtable updates. Returns (counts, updates).
 
-    `p17` needs get_order_shipments(ext_order_id); `at` needs find_record + update_record.
-    Resolves each shipment's Pipe17 shipmentId to its SR's extShipmentId (= the Airtable
-    "Shipment Number"), one SR fetch per distinct order. updates is a list of
-    (ext_shipment, record_id, fields, group) for logging/Slack."""
+    A fulfillment carries the Pipe17 shipmentId, which is the Shipments row key ("Pipe17
+    Shipping Request ID"), so each parcel shipment's row is found directly by it; the
+    reused Shipment Number is never used to match. `p17` is unused (kept for the
+    caller's signature); `at` needs find_record + update_record. updates is a list of
+    (shipment number, record_id, fields, group) for logging/Slack."""
     groups = group_parcel_shipments(fulfillments, require_tag=require_tag)
     counts = {"fulfillments": len(fulfillments or []), "parcel_shipments": len(groups),
               "updated": 0, "would_update": 0, "unchanged": 0,
@@ -110,22 +111,9 @@ def reconcile(fulfillments, p17, at, *, dry_run, require_tag=None, log=None):
     if not groups:
         return counts, []
 
-    # shipmentId -> extShipmentId. A fulfillment carries extOrderId but not extShipmentId,
-    # so resolve via the order's shipping requests (SR.shipmentId -> SR.extShipmentId).
-    ext_by_shipment = {}
-    for ext_order in sorted({g["extOrderId"] for g in groups.values() if g.get("extOrderId")}):
-        for sr in p17.get_order_shipments(ext_order):
-            sid = sr.get("shipmentId")
-            if sid:
-                ext_by_shipment[sid] = sr.get("extShipmentId")
-
     updates = []
     for sid, g in groups.items():
-        ext_ship = ext_by_shipment.get(sid)
-        if not ext_ship:
-            counts["no_sr"] += 1
-            continue
-        rec = at.find_record(SHIPMENTS_TABLE, SHIPMENT_NUMBER_NAME, ext_ship)
+        rec = at.find_record(SHIPMENTS_TABLE, SHIP_REQUEST_ID_NAME, sid)
         if not rec:
             counts["not_in_airtable"] += 1          # update-only: never created here
             continue
@@ -134,7 +122,7 @@ def reconcile(fulfillments, p17, at, *, dry_run, require_tag=None, log=None):
         if not fields:
             counts["unchanged"] += 1
             continue
-        updates.append((ext_ship, rec["id"], fields, g))
+        updates.append((f.get(F_SHIPMENT_NUMBER) or sid, rec["id"], fields, g))
         if dry_run:
             counts["would_update"] += 1
         else:

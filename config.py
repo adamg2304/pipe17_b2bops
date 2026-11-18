@@ -38,6 +38,32 @@ F_CUSTOMER_EMAIL = "fldH76ux37k5Hmhnw"
 F_LINE_ITEMS = "fldrmuH8qsLeBDAtr"
 F_SHIPMENT_CREATION_DATE = "fldAR0iUA9liD09QA"
 F_PIPE17_REQUEST_LINK = "fldEWt9Sq7Q41vydM"   # Pipe17 Shipping Request deep link
+# --- Shipment key: Pipe17 shipping request ID ------------------------------
+# Pipe17 `shipmentId` (e.g. d80e16ccb89961a5) is the ONLY upsert key for Shipments.
+# extShipmentId ("Shipment Number") is display-only: Pipe17 reuses it when a backorder SR
+# is canceled and re-routed, so it can't identify a row. Nothing matches on it alone.
+F_SHIP_REQUEST_ID = os.environ.get("F_SHIP_REQUEST_ID", "fldffkU7iYRmCfyKz")    # singleLineText
+SHIP_REQUEST_ID_NAME = os.environ.get("SHIP_REQUEST_ID_NAME", "Pipe17 Shipping Request ID")
+# Replacement sweep fields. These do not exist in the base yet: add them, then set the
+# field IDs here or in the job env. While a field ID is blank, the sweep computes and
+# logs it but does not write it (Status "Replaced" is still written).
+#   Replaced By — link to Shipments (on the canceled row: the live SR row(s) that took
+#                 over its lines). Replaces — link to Shipments (on the replacement row).
+#   Orphaned    — checkbox (canceled row whose lines have no live SR after the grace).
+F_REPLACED_BY = os.environ.get("F_REPLACED_BY", "")
+F_REPLACES = os.environ.get("F_REPLACES", "")
+F_ORPHANED = os.environ.get("F_ORPHANED", "")
+REPLACED_BY_NAME = os.environ.get("REPLACED_BY_NAME", "Replaced By")
+ORPHANED_NAME = os.environ.get("ORPHANED_NAME", "Orphaned")
+# Ops-entered Shipments fields copied from a canceled row to its replacement(s) when the
+# replacement's value is empty. Shipments has no Ops Owner or delivery-date fields (those
+# live on Orders), so the default is Notes + Shipment Deficiency Detail. Comma-separated
+# field IDs; override in env.
+F_SHIP_NOTES = "fldvQKcpwF63moHBq"
+F_SHIP_DEFICIENCY_DETAIL = "fldIIxqALYFL173DG"
+REPLACEMENT_COPY_FIELDS = tuple(
+    f for f in os.environ.get(
+        "REPLACEMENT_COPY_FIELDS", f"{F_SHIP_NOTES},{F_SHIP_DEFICIENCY_DETAIL}").split(",") if f)
 
 FIELD_LABELS = {
     F_SHIPMENT_NUMBER: "Shipment Number", F_ORDER_LINK: "Order Link",
@@ -77,6 +103,11 @@ PIPE17_STATUS_SENT = os.environ.get("PIPE17_STATUS_SENT", "sentToFulfillment")
 # = sent to the warehouse (packing list present). Env-overridable.
 SHIP_STATUS_IN_REVIEW = os.environ.get("SHIP_STATUS_IN_REVIEW", "In Review")
 SHIP_STATUS_PROCESSING = os.environ.get("SHIP_STATUS_PROCESSING", "Processing")
+# A live SR sitting on a virtual backorder location (not yet sent to fulfillment).
+SHIP_STATUS_BACKORDERED = os.environ.get("SHIP_STATUS_BACKORDERED", "Backordered")
+# Canceled SR whose lines moved to live replacement SR(s); set by the replacement sweep.
+SHIP_STATUS_REPLACED = os.environ.get("SHIP_STATUS_REPLACED", "Replaced")
+SHIP_STATUS_CANCELLED = os.environ.get("SHIP_STATUS_CANCELLED", "Cancelled")
 STATUS_MAP = {
     "draft": None,
     "new": SHIP_STATUS_PROCESSING,
@@ -106,12 +137,14 @@ DEFAULT_SHIPMENT_STATUS = None
 # Ranks define the ordering only — their absolute values don't matter.
 SHIP_STATUS_RANK = {
     "Out of Stock": 1,
+    SHIP_STATUS_BACKORDERED: 1,
     SHIP_STATUS_IN_REVIEW: 2,
     SHIP_STATUS_PROCESSING: 3,
     "Ready to Book": 4,
     "In-Transit": 5,
     "Arrived": 6,
     "Cancelled": 7,
+    SHIP_STATUS_REPLACED: 7,
 }
 # Packing lists are generated only for shipments in these Pipe17 statuses (BLK-1/3):
 # a shipment must be handed to the warehouse before its pick list is real.
@@ -134,6 +167,31 @@ SR_COMMITTED_STATUSES = {
     "readyToShip", "partialShipped", "shipped", "inTransit", "delivered",
 }
 SR_CANCELED_STATUSES = {"canceled", "canceledRestock", "returned"}
+
+# --- Backorder locations + replacement sweep -----------------------------------
+# Out-of-stock lines get an SR on a virtual backorder location. When stock lands, Pipe17
+# cancels it and routes a new SR, often reusing the same extShipmentId; line uniqueIds
+# (line-7) survive, which is how the sweep links a canceled SR to its replacement(s).
+# An SR is "backorder" when its location is listed here, its location name contains
+# BACKORDER_NAME_HINT (catches new backorder locations without a config change), or its
+# fulfillmentIntegrationId is in BACKORDER_INTEGRATION_IDS. Several backorder locations
+# use a real integration (f2ae5925...), so the integration test alone is not enough.
+BACKORDER_LOCATION_IDS = frozenset(
+    x for x in os.environ.get(
+        "BACKORDER_LOCATION_IDS",
+        "8f1d050785329517,be5624a3c307a1ec,0ba82cf8e9b75e8e,ed321f4c0b1be777,"
+        "d11fad36eed3cc4c,961b753dbc540b43,c6a7f07924d47f53,f8bcaecb6eb5886c").split(",") if x)
+BACKORDER_INTEGRATION_IDS = frozenset(
+    x for x in os.environ.get("BACKORDER_INTEGRATION_IDS",
+                              "no-fulfillment-integration").split(",") if x)
+BACKORDER_NAME_HINT = os.environ.get("BACKORDER_NAME_HINT", "backorder").lower()
+# A canceled SR whose lines have no live replacement is flagged Orphaned only after this
+# long (one polling cycle by default), so a cancel-then-reroute in flight isn't flagged.
+ORPHAN_GRACE_MINUTES = int(os.environ.get("ORPHAN_GRACE_MINUTES", "30"))
+# Each run also re-sweeps orders that still have an unresolved canceled row (Cancelled,
+# not Orphaned, no Replaced By) ingested within this many days, independent of the
+# updatedSince window, so a late replacement or the orphan grace is always picked up.
+SWEEP_RECHECK_DAYS = int(os.environ.get("SWEEP_RECHECK_DAYS", "14"))
 NORMALIZE_SHIPMENT_NUMBER = os.environ.get("NORMALIZE_SHIPMENT_NUMBER", "false").lower() == "true"
 
 # ============================================================================

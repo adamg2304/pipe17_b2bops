@@ -3,7 +3,7 @@
 Run: HUBSPOT_TOKEN=x PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest_repair.py
 """
 import repair
-from config import (O_ORDER_NUMBER, SHIPMENT_NUMBER_FIELD, PIPE17_TAG_FILTER,
+from config import (O_ORDER_NUMBER, PIPE17_TAG_FILTER,
                     REPAIR_STATUS_HEALED, REPAIR_STATUS_REVIEW)
 
 passed = failed = 0
@@ -24,7 +24,15 @@ repair.p17.get_customer = lambda cid: {"name": "Acme"}
 repair.p17.get_order_shipments = lambda ext: _ORDER_SRS.get(ext, [])
 repair.inventory_state.apply_to_fields = lambda *a, **k: None
 repair.order_to_airtable = lambda o, c, is_new=True: {O_ORDER_NUMBER: o.get("extOrderId")}
-repair.shipment_to_airtable = lambda s, location_map=None: {SHIPMENT_NUMBER_FIELD: s.get("extShipmentId")}
+syncs = []            # (ext_order, [shipping request ids]) per keyed shipment re-sync
+
+
+def _sync_order(ext, *, p17, at, loc_names=None, order_row_id=None, dry_run=True, srs=None, **kw):
+    syncs.append((ext, [s.get("shipmentId") for s in srs or []], dry_run))
+    return {"actions": [{"phase": "sr", "action": "create"} for _ in srs or []], "plan": {}}
+
+
+repair.shipment_sync.sync_order = _sync_order
 
 
 def _upsert(table, records, merge):
@@ -46,7 +54,7 @@ TAG = PIPE17_TAG_FILTER
 
 
 def reset():
-    upserts.clear(); _ORDERS.clear(); _ORDER_SRS.clear(); _EXISTING.clear()
+    upserts.clear(); syncs.clear(); _ORDERS.clear(); _ORDER_SRS.clear(); _EXISTING.clear()
 
 
 # ---- order cases --------------------------------------------------------
@@ -89,28 +97,37 @@ r = repair.diagnose_and_heal("#BE6", dry_run=True)
 check("dry-run writes nothing", not r["healed"] and len(upserts) == 0)
 
 # ---- SR cases -----------------------------------------------------------
+# Rows are keyed on the shipping request ID, so an SR repair re-syncs the whole order
+# (all its SRs) through shipment_sync.sync_order; it never upserts by Shipment Number.
 reset()
-_ORDER_SRS["#BE7"] = [{"extShipmentId": "#BE7.1", "tags": [TAG]},
-                      {"extShipmentId": "#BE7.2", "tags": [TAG]}]
+_ORDER_SRS["#BE7"] = [{"shipmentId": "s71", "extShipmentId": "#BE7.1", "tags": [TAG]},
+                      {"shipmentId": "s72", "extShipmentId": "#BE7.2", "tags": [TAG]}]
 r = repair.diagnose_and_heal("#BE7.2")  # one specific SR, auto-detected as SR by suffix
-check("SR by suffix -> heals just that SR", r["kind"] == "sr" and r["healed"] and len(upserts) == 1
-      and upserts[0][1][0][SHIPMENT_NUMBER_FIELD] == "#BE7.2")
+check("SR by suffix -> keyed re-sync of its order", r["kind"] == "sr" and r["healed"]
+      and syncs == [("#BE7", ["s71", "s72"], False)])
+check("SR repair never upserts by Shipment Number", upserts == [])
 
 reset()
-_ORDER_SRS["#BE8"] = [{"extShipmentId": "#BE8.1", "tags": [TAG]},
-                      {"extShipmentId": "#BE8.2", "tags": [TAG]}]
+_ORDER_SRS["#BE8"] = [{"shipmentId": "s81", "extShipmentId": "#BE8.1", "tags": [TAG]},
+                      {"shipmentId": "s82", "extShipmentId": "#BE8.2", "tags": [TAG]}]
 r = repair.diagnose_and_heal("#BE8", kind="sr")  # whole-order SR heal
-check("SR kind, no suffix -> heals all SRs", r["healed"] and len(upserts) == 2)
+check("SR kind, no suffix -> keyed re-sync of all SRs", r["healed"]
+      and syncs == [("#BE8", ["s81", "s82"], False)])
 
 reset()
-_ORDER_SRS["#BE9"] = [{"extShipmentId": "#BE9.1", "tags": ["Other"]}]
+_ORDER_SRS["#BE9"] = [{"shipmentId": "s91", "extShipmentId": "#BE9.1", "tags": ["Other"]}]
 r = repair.diagnose_and_heal("#BE9.1")  # untagged SR
-check("untagged SR -> not healed without force", not r["healed"] and len(upserts) == 0)
+check("untagged SR -> not healed without force", not r["healed"] and syncs == [])
 
 reset()
-_ORDER_SRS["#BE9"] = [{"extShipmentId": "#BE9.1", "tags": ["Other"]}]
+_ORDER_SRS["#BE9"] = [{"shipmentId": "s91", "extShipmentId": "#BE9.1", "tags": ["Other"]}]
 r = repair.diagnose_and_heal("#BE9.1", force=True)
-check("untagged SR + force -> healed", r["healed"] and len(upserts) == 1)
+check("untagged SR + force -> healed", r["healed"] and len(syncs) == 1)
+
+reset()
+_ORDER_SRS["#BE10"] = [{"shipmentId": "s101", "extShipmentId": "#BE10", "tags": [TAG]}]
+r = repair.diagnose_and_heal("#BE10", kind="sr", dry_run=True)
+check("SR dry-run -> no sync", not r["healed"] and syncs == [])
 
 # ---- id normalization ---------------------------------------------------
 check("normalize_id adds '#'", repair.normalize_id("BE123") == "#BE123")

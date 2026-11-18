@@ -25,6 +25,55 @@ Airtable **field IDs**. A fail-safe aborts any live run with the tag gate disabl
 Order contact (name/email/phone/company) is read from the Pipe17 **customer** object,
 which Track B attaches.
 
+### Shipments key: Pipe17 shipping request ID
+Shipments rows are keyed on the Pipe17 **shipping request ID** (`shipmentId`, field
+**Pipe17 Shipping Request ID**). It is the only upsert key. **Shipment Number**
+(`extShipmentId`) is still written for display, but nothing matches on it: when a backorder
+SR is canceled and re-routed, Pipe17 often gives the new SR the same number
+(#BE63027606419 has two SRs on `#BE63027606419` and two on `#BE63027606419.2`).
+
+Each run collects the orders behind the tagged SRs updated in the window, then syncs each
+order as a whole (`shipment_sync.sync_order`): it reads ALL the order's SRs, whatever their
+tag or channel, and writes one row per SR. Only changed fields are written, so a re-run on
+unchanged data writes nothing. Rules:
+- **Status** is forward-only. Once a row reaches Processing (sent to fulfillment) it is
+  never moved to an earlier status, and a status Ops set by hand is kept.
+- **Backordered**: a live SR on a backorder location (listed in `BACKORDER_LOCATION_IDS`,
+  "backorder" in the location name, or the `no-fulfillment-integration` integration). No
+  packing list or shipping document is made until the SR is sent to fulfillment.
+
+**Replacement sweep.** For each canceled SR (`canceled` / `canceledRestock`) the sweep
+looks up its line `uniqueId`s on the order's live SRs created after it. Line IDs survive a
+cancel-and-reroute, so this finds the replacement(s): a split gives several, and a chain
+(canceled twice) resolves to the newest live SR. The canceled row gets Status **Replaced**,
+**Replaced By** → the replacement row(s), and each replacement gets **Replaces** ← the
+canceled row(s). Notes and Shipment Deficiency Detail (`REPLACEMENT_COPY_FIELDS`) are
+copied onto a replacement when its own value is empty. If a line the order still needs has
+no live SR `ORPHAN_GRACE_MINUTES` (30) after the cancel, the row stays **Cancelled**, is
+flagged **Orphaned**, and one Slack alert is sent. Every run also re-sweeps orders that
+still have an unsettled canceled row from the last `SWEEP_RECHECK_DAYS` (14), so a late
+replacement or the orphan grace is picked up even when nothing on the order changed.
+
+Check one order without writing:
+```bash
+DRY_RUN=true python main.py --order '#BE63027606419'
+```
+
+**Backfill (run once, before deploying the keyed sync).** Existing rows have no shipping
+request ID, and the keyed sync never adopts a row by Shipment Number, so un-backfilled rows
+would get a duplicate the next time their SR changes.
+```bash
+python backfill_shipment_ids.py                      # dry run; writes backfill_shipment_ids.csv
+python backfill_shipment_ids.py --order '#BE63027606419'
+python backfill_shipment_ids.py --apply              # write the unambiguous matches
+```
+For each unkeyed Pipe17 row it scores the SRs with the row's Shipment Number on line
+items (SKU + qty from the Line Items text; Airtable never stored line IDs), Origin WH, and
+creation time (an SR created after the row cannot own it, which catches rows a later SR
+overwrote). It writes only when exactly one SR passes all three. Everything else is in the
+CSV with the reason, each candidate's scores and, where one SR is time-consistent, a
+suggested ID to paste into **Pipe17 Shipping Request ID** by hand.
+
 ### Shipment Details + link
 When a shipment is sent to fulfillment, the sync attaches its packing list to **Shipment
 Details** and publishes the same PDF to the public GCS bucket (`GCS_ORDER_SLIP_BUCKET`,
