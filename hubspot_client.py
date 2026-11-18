@@ -9,7 +9,7 @@ from config import (
     HS_DEAL_PIPELINE_ID, HS_PIPE17_ORDER_ID_PROP,
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_LI_PROPS,
     HS_DELIVERY_CONTACT_LABEL,
-    HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP,
+    HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP, HS_TAX_TOTAL_PROP,
     HS_HOLD_STAGE_IDS, HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID,
 )
 
@@ -32,7 +32,7 @@ def _request(method, path, **kwargs):
 
 def _deal_properties():
     props = {HS_CURRENCY_PROP, HS_PIPE17_ORDER_ID_PROP, "dealname", "amount",
-             HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP}
+             HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP, HS_TAX_TOTAL_PROP}
     props.update(v for v in HS_SHIP_ADDR_PROPS.values() if v)
     return sorted(props)
 
