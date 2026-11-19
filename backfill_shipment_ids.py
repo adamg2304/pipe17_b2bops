@@ -16,9 +16,22 @@ row's Shipment Number is scored:
            reused number overwrote (#BE63027606419 / .2 now show the canceled backorder
            SR's lines but were created for the earlier live SRs).
 
-The ID is written only when exactly one SR passes all three and no other row in the
-order claims it. Everything else goes to the CSV with the reason, every candidate's
-scores, and a suggested ID when exactly one candidate is time-consistent.
+Rules, in order (the first that applies picks the SR; each match is logged with its rule):
+
+  exact             exactly one SR passes all three checks.
+  single_candidate  the row's number has exactly one SR, and its lines and location
+                    match, but it was created after the row. These are rows the
+                    pre-Pipe17 flow created before Pipe17 issued the SR (#BE15xxx).
+  live_candidate    exactly one candidate SR is live (not canceled), and its time or its
+                    lines match. A row a reused number overwrote is keyed to the live SR,
+                    so ops' status and loads stay with the shipment that is moving; the
+                    canceled SR gets its own row from the sync, marked Replaced.
+  all_canceled      every candidate SR is canceled, and exactly one was created before
+                    the row: the SR the row was created for.
+
+An SR claimed by two rows of the order is written for neither. Everything else goes to
+the CSV with the reason, every candidate's scores, and a suggested ID when exactly one
+candidate is time-consistent.
 
 Usage (locally, or as the pipe17-airtable-sync job via the "Run Cloud Run Job" workflow
 with args `backfill_shipment_ids.py` and log_lines raised; every unresolved row is logged
@@ -39,7 +52,7 @@ from collections import Counter, defaultdict
 
 from config import (
     SHIPMENTS_TABLE, F_SHIP_REQUEST_ID, SHIP_REQUEST_ID_NAME, F_SHIPMENT_NUMBER,
-    F_LINE_ITEMS, F_ORIGIN_WH, F_PIPE17_REQUEST_LINK,
+    F_LINE_ITEMS, F_ORIGIN_WH, F_PIPE17_REQUEST_LINK, SR_CANCELED_STATUSES,
 )
 
 log = logging.getLogger("pipe17-airtable")
@@ -98,9 +111,33 @@ def score(row, sr, loc_names):
     return lines_ok, loc_ok, time_ok
 
 
+def pick(scored):
+    """(sr, rule) for one row's scored candidates [(sr, (lines, loc, time))], or (None, why)
+    where why is no_exact_match / multiple_exact_matches. See the module docstring."""
+    exact = [s for s, (l, lo, t) in scored if l and lo is not False and t is not False]
+    if len(exact) == 1:
+        return exact[0], "exact"
+    if len(exact) > 1:
+        return None, "multiple_exact_matches"
+    if len(scored) == 1:
+        s, (l, lo, t) = scored[0]
+        if l and lo is not False:
+            return s, "single_candidate"
+    live = [(s, sc) for s, sc in scored if s.get("status") not in SR_CANCELED_STATUSES]
+    if len(live) == 1:
+        s, (l, lo, t) = live[0]
+        if t is not False or l:
+            return s, "live_candidate"
+    if scored and not live:
+        timely = [s for s, (l, lo, t) in scored if t is not False]
+        if len(timely) == 1:
+            return timely[0], "all_canceled"
+    return None, "no_exact_match"
+
+
 def plan_backfill(rows, srs_by_order, loc_names, claimed=()):
-    """(matches, unresolved). matches: [(record_id, shipmentId, number)]. unresolved: CSV
-    dicts. `claimed` = shipmentIds already on some row (never assigned twice)."""
+    """(matches, unresolved). matches: [(record_id, shipmentId, number, rule)]. unresolved:
+    CSV dicts. `claimed` = shipmentIds already on some row (never assigned twice)."""
     claimed = set(claimed)
     by_order = defaultdict(list)
     for r in rows:
@@ -126,26 +163,24 @@ def plan_backfill(rows, srs_by_order, loc_names, claimed=()):
             desc = "; ".join(
                 f"{s['shipmentId']} {s.get('status')} lines={l} loc={lo} time={t}"
                 for s, (l, lo, t) in scored)
-            exact = [s for s, (l, lo, t) in scored if l and lo is not False and t is not False]
             timely = [s for s, (l, lo, t) in scored if t is not False]
             suggest = timely[0]["shipmentId"] if len(timely) == 1 else ""
             if not cands:
                 unresolved.append(dict(base, reason="no_sr_with_this_number"))
-            elif len(exact) == 1:
-                proposals[r["id"]] = (exact[0]["shipmentId"], base, desc)
-            elif not exact:
-                unresolved.append(dict(base, reason="no_exact_match", candidates=desc,
-                                       suggested_shipment_id=suggest))
+                continue
+            chosen, rule = pick(scored)
+            if chosen:
+                proposals[r["id"]] = (chosen["shipmentId"], rule, base, desc)
             else:
-                unresolved.append(dict(base, reason="multiple_exact_matches", candidates=desc,
+                unresolved.append(dict(base, reason=rule, candidates=desc,
                                        suggested_shipment_id=suggest))
-        taken = Counter(sid for sid, _, _ in proposals.values())
-        for rid, (sid, base, desc) in proposals.items():
+        taken = Counter(sid for sid, _, _, _ in proposals.values())
+        for rid, (sid, rule, base, desc) in proposals.items():
             if taken[sid] > 1:
                 unresolved.append(dict(base, reason="shipment_id_matched_by_several_rows",
                                        candidates=desc))
             else:
-                matches.append((rid, sid, base["shipment_number"]))
+                matches.append((rid, sid, base["shipment_number"], rule))
     return matches, unresolved
 
 
@@ -183,8 +218,9 @@ def run(p17, at, loc_names, *, apply=False, only_order=None, csv_path="backfill_
         if srs:
             srs_by_order[o] = srs
     matches, unresolved = plan_backfill(rows, srs_by_order, loc_names, claimed - {None})
-    for rid, sid, num in matches:
-        log.info("%s %s %s -> %s", "WRITE" if apply else "[DRY_RUN] would write", rid, num, sid)
+    for rid, sid, num, rule in matches:
+        log.info("%s %s %s -> %s (%s)", "WRITE" if apply else "[DRY_RUN] would write",
+                 rid, num, sid, rule)
     # Each unresolved row is also logged as one JSON line (same columns as the CSV), so a
     # Cloud Run execution, whose local CSV is lost with the container, can be reviewed from
     # its logs: filter on BACKFILL_UNRESOLVED. No customer name/address/email is included.
@@ -193,11 +229,13 @@ def run(p17, at, loc_names, *, apply=False, only_order=None, csv_path="backfill_
                  json.dumps({k: row.get(k, "") for k in CSV_COLUMNS}, sort_keys=False))
     write_csv(csv_path, unresolved)
     by_reason = Counter(u["reason"] for u in unresolved)
-    log.info("Backfill: %d unambiguous match(es), %d to review (%s) in %s",
-             len(matches), len(unresolved),
+    by_rule = Counter(m[3] for m in matches)
+    log.info("Backfill: %d match(es) (%s), %d to review (%s) in %s",
+             len(matches), ", ".join(f"{r}={n}" for r, n in sorted(by_rule.items())) or "none",
+             len(unresolved),
              ", ".join(f"{r}={n}" for r, n in sorted(by_reason.items())) or "none", csv_path)
     if apply and matches:
-        at.update_records(SHIPMENTS_TABLE, [(rid, {F_SHIP_REQUEST_ID: sid}) for rid, sid, _ in matches])
+        at.update_records(SHIPMENTS_TABLE, [(rid, {F_SHIP_REQUEST_ID: sid}) for rid, sid, _, _ in matches])
         log.info("Backfill: wrote %d shipping request ID(s)", len(matches))
     return matches, unresolved
 

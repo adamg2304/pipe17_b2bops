@@ -37,7 +37,7 @@ check("row_lines rejects unparseable text", bf.row_lines("see notes") is None)
 
 # ---- live rows (2026-11-18): all three unambiguous
 matches, unresolved = bf.plan_backfill(FIX["airtable_rows_2026_11_18"], SRS, LOCS)
-got = {num: sid for _, sid, num in matches}
+got = {num: sid for _, sid, num, _ in matches}
 check("3 rows matched, none unresolved", len(matches) == 3 and unresolved == [])
 check("#BE63027606419 -> fulfilled Visalia SR, not the canceled backorder SR",
       got.get("#BE63027606419") == "cead8dd5563caab7")
@@ -45,20 +45,68 @@ check("#BE63027606419.2 -> In-Desk Power SR, not the canceled backorder SR",
       got.get("#BE63027606419.2") == "604e19849f556c56")
 check("#BE63027606419.3 -> its only SR", got.get("#BE63027606419.3") == "0c64cbec5be41092")
 
-# ---- overwritten rows (2026-11-09): content matches the canceled SRs, but those were
-# created after the rows, so nothing is written for them; CSV suggests the timely SR.
+# ---- overwritten rows (2026-11-09): base and .2 show the canceled backorder SR's lines,
+# which was created after them. live_candidate keys each to the live SR it was created for.
 matches, unresolved = bf.plan_backfill(FIX["airtable_rows_2026_11_09_overwritten"], SRS, LOCS)
-check("overwritten state: only .3 written", [m[2] for m in matches] == ["#BE63027606419.3"])
-by_num = {u["shipment_number"]: u for u in unresolved}
-check("overwritten base row -> CSV, no_exact_match",
-      by_num["#BE63027606419"]["reason"] == "no_exact_match")
-check("...suggests the SR the row was created for",
-      by_num["#BE63027606419"]["suggested_shipment_id"] == "cead8dd5563caab7")
-check("overwritten .2 row suggests the In-Desk Power SR",
-      by_num["#BE63027606419.2"]["suggested_shipment_id"] == "604e19849f556c56")
-check("CSV candidates show the canceled SR failing the time check",
-      "d80e16ccb89961a5 canceledRestock lines=True loc=True time=False"
-      in by_num["#BE63027606419"]["candidates"])
+got = {num: (sid, rule) for _, sid, num, rule in matches}
+check("overwritten state: all 3 rows keyed, none unresolved", len(matches) == 3 and not unresolved)
+check("overwritten base row -> live Visalia SR (live_candidate)",
+      got["#BE63027606419"] == ("cead8dd5563caab7", "live_candidate"))
+check("overwritten .2 row -> live In-Desk Power SR (live_candidate)",
+      got["#BE63027606419.2"] == ("604e19849f556c56", "live_candidate"))
+check(".3 still exact", got["#BE63027606419.3"] == ("0c64cbec5be41092", "exact"))
+check("the canceled backorder SRs are never picked",
+      not {"d80e16ccb89961a5", "357c27692e38bf57"} & {sid for sid, _ in got.values()})
+
+# ---- the new rules on synthetic rows (shapes seen in the 2026-11-19 dry run)
+def _row(rid, num, created, wh="Inland Star - Visalia (VIS)", li="2 x 99-73-00-99 - Base"):
+    return {"id": rid, "createdTime": created,
+            "fields": {NUM: num, F_ORIGIN_WH: wh, F_LINE_ITEMS: li}}
+
+
+def _sr(sid, num, status, created, loc="34b98f63b3ad51f6", lines=(("99-73-00-99", 2),)):
+    return {"shipmentId": sid, "extShipmentId": num, "status": status, "locationId": loc,
+            "createdAt": created, "lineItems": [{"sku": k, "quantity": q} for k, q in lines]}
+
+
+def _pick(row, srs, order):
+    m, u = bf.plan_backfill([row], {order: srs}, LOCS)
+    return (m[0][1], m[0][3]) if m else (None, u[0]["reason"])
+
+
+# #BE15xxx shape: row made by the pre-Pipe17 flow, Pipe17's only SR created later.
+check("single_candidate: one SR, lines + location match, created after the row",
+      _pick(_row("r1", "#BE15659", "2026-10-01T00:00:00Z"),
+            [_sr("S1", "#BE15659", "canceled", "2026-10-20T00:00:00Z")], "#BE15659")
+      == ("S1", "single_candidate"))
+# #BE15561 shape: one live SR, nothing matches and it postdates the row -> left alone.
+check("single live SR with no line/time match is not forced",
+      _pick(_row("r2", "#BE15561", "2026-10-01T00:00:00Z", li=""),
+            [_sr("S2", "#BE15561", "reviewRequired", "2026-10-20T00:00:00Z")], "#BE15561")
+      == (None, "no_exact_match"))
+# #BE66642454884 shape: original canceled, live replacement reused the number + overwrote.
+check("live_candidate: the one live SR wins over the canceled original",
+      _pick(_row("r3", "#BE7", "2026-10-01T00:00:00Z"),
+            [_sr("ORIG", "#BE7", "canceledRestock", "2026-09-30T00:00:00Z", lines=(("X", 1),)),
+             _sr("LIVE", "#BE7", "fulfilled", "2026-10-10T00:00:00Z")], "#BE7")
+      == ("LIVE", "live_candidate"))
+# #BE65572617229 shape: every candidate canceled, one created before the row.
+check("all_canceled: the SR created before the row",
+      _pick(_row("r4", "#BE8", "2026-10-01T00:00:00Z"),
+            [_sr("OLD", "#BE8", "canceled", "2026-09-30T00:00:00Z", lines=(("X", 1),)),
+             _sr("NEW", "#BE8", "canceledRestock", "2026-10-10T00:00:00Z")], "#BE8")
+      == ("OLD", "all_canceled"))
+check("all canceled, none created before the row -> left alone",
+      _pick(_row("r5", "#BE9", "2026-10-01T00:00:00Z"),
+            [_sr("A", "#BE9", "canceled", "2026-10-05T00:00:00Z", lines=(("X", 1),)),
+             _sr("B", "#BE9", "canceled", "2026-10-10T00:00:00Z", lines=(("Y", 1),))], "#BE9")
+      == (None, "no_exact_match"))
+check("two live SRs, neither exact -> left alone",
+      _pick(_row("r6", "#BE10", "2026-10-01T00:00:00Z"),
+            [_sr("A", "#BE10", "reviewRequired", "2026-09-30T00:00:00Z", lines=(("X", 1),)),
+             _sr("B", "#BE10", "sentToFulfillment", "2026-09-30T00:00:00Z", lines=(("Y", 1),))],
+            "#BE10")
+      == (None, "no_exact_match"))
 
 # ---- other reasons
 claimed = {"cead8dd5563caab7", "604e19849f556c56", "0c64cbec5be41092"}
@@ -111,15 +159,20 @@ class FakeP17:
 
 tmp = tempfile.mkdtemp()
 path = os.path.join(tmp, "out.csv")
-at = FakeAT(FIX["airtable_rows_2026_11_09_overwritten"])
+NO_SR = _row("recNOSR", "#BE63027606419.9", "2026-11-01T00:00:00Z")      # number Pipe17 never issued
+HANDMADE = _row("recHAND", "#BE63027606419p", "2026-11-01T00:00:00Z")    # ops-made "p" copy
+RUN_ROWS = FIX["airtable_rows_2026_11_09_overwritten"] + [NO_SR, HANDMADE]
+at = FakeAT(RUN_ROWS)
 bf.run(FakeP17(), at, LOCS, apply=False, csv_path=path)
 check("dry run writes nothing", at.writes == [])
 rows = list(csv.DictReader(open(path)))
-check("CSV has the two overwritten rows", sorted(r["shipment_number"] for r in rows)
-      == ["#BE63027606419", "#BE63027606419.2"])
+check("CSV has the two unresolvable rows", sorted(r["shipment_number"] for r in rows)
+      == ["#BE63027606419.9", "#BE63027606419p"])
 bf.run(FakeP17(), at, LOCS, apply=True, csv_path=path)
-check("--apply writes only the unambiguous match",
-      at.writes == [("rec0HOQvanaQp2YDt", {KEY: "0c64cbec5be41092"})])
+check("--apply writes exactly the 3 matches",
+      sorted(at.writes) == sorted([("rec0HOQvanaQp2YDt", {KEY: "0c64cbec5be41092"}),
+                                   ("recN3ByfNCxMPIrew", {KEY: "cead8dd5563caab7"}),
+                                   ("recbETsKPT1Ln7RzM", {KEY: "604e19849f556c56"})]))
 at2 = FakeAT(FIX["airtable_rows_2026_11_18"])
 bf.run(FakeP17(), at2, LOCS, apply=False, csv_path=path, only_order="#BE99")
 check("--order filters to that order's rows", at2.writes == [])
@@ -140,15 +193,18 @@ class _Cap(logging.Handler):
 cap = _Cap()
 bf.log.addHandler(cap)
 bf.log.setLevel(logging.INFO)
-bf.run(FakeP17(), FakeAT(FIX["airtable_rows_2026_11_09_overwritten"]), LOCS, csv_path=path)
+bf.run(FakeP17(), FakeAT(RUN_ROWS), LOCS, csv_path=path)
 bf.log.removeHandler(cap)
 logged = [json.loads(l.split(" ", 1)[1]) for l in cap.lines if l.startswith("BACKFILL_UNRESOLVED ")]
 check("each unresolved row logged as one JSON line",
-      sorted(r["shipment_number"] for r in logged) == ["#BE63027606419", "#BE63027606419.2"])
-check("logged line carries reason + suggestion",
-      {r["suggested_shipment_id"] for r in logged} == {"cead8dd5563caab7", "604e19849f556c56"})
-check("summary line counts by reason",
-      any("no_exact_match=2" in l for l in cap.lines))
+      sorted(r["shipment_number"] for r in logged) == ["#BE63027606419.9", "#BE63027606419p"])
+check("logged line carries the reason",
+      {r["reason"] for r in logged} == {"no_sr_with_this_number", "pipe17_order_not_found"})
+check("would-write lines name the rule",
+      any("cead8dd5563caab7 (live_candidate)" in l for l in cap.lines))
+check("summary line counts matches by rule and unresolved by reason",
+      any("exact=1, live_candidate=2" in l and "no_sr_with_this_number=1" in l
+          for l in cap.lines))
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
