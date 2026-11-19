@@ -16,14 +16,12 @@ import re
 import pipe17_client as p17
 import airtable_client as at
 import inventory_state
-import shipment_gate
-from transform import shipment_to_airtable
+import shipment_sync
 from order_transform import order_to_airtable
 from config import (
     PIPE17_TAG_FILTER, ORDER_SYNC_STATUSES,
-    ORDERS_TABLE, SHIPMENTS_TABLE, ORDER_NUMBER_FIELD, ORDER_MERGE_FIELD,
+    ORDERS_TABLE, ORDER_NUMBER_FIELD, ORDER_MERGE_FIELD,
     O_ORDER_NUMBER, O_INVENTORY_STATE, O_EXCEPTION_FLAG,
-    SHIPMENT_NUMBER_FIELD, SHIPMENT_ORDER_LINK_FIELD,
     REPAIR_STATUS_HEALED, REPAIR_STATUS_NOT_HEALED, REPAIR_STATUS_REVIEW,
     REPAIR_TYPE_ORDER, REPAIR_TYPE_SR,
 )
@@ -172,33 +170,28 @@ def _repair_sr(num, force, dry_run):
                        diagnosis=f"Would upsert {len(targets)} shipping request(s) for {ext_order}.",
                        outcome="[dry-run] no write.")
 
-    # One owning SR per shipment number: Pipe17 can re-create an SR under a canceled
-    # one's number, and the canceled copy must not overwrite the live row.
-    owners = {}
-    for s in targets:
-        key = s.get("extShipmentId")
-        owners[key] = shipment_gate.prefer(owners.get(key), s)
-    targets = list(owners.values())
-
-    loc_map = _loc_map()
-    n = 0
-    for s in targets:
-        f = shipment_to_airtable(s, location_map=loc_map)
-        if not f.get(SHIPMENT_NUMBER_FIELD):
-            continue
-        if order_row:
-            f[SHIPMENT_ORDER_LINK_FIELD] = [order_row]
-        at.upsert(SHIPMENTS_TABLE, [f], [SHIPMENT_NUMBER_FIELD])
-        n += 1
+    # Rows are keyed on the shipping request ID, and a reused Shipment Number can name
+    # several SRs, so the repair re-syncs the WHOLE order through the same keyed sync the
+    # scheduled job uses (one row per SR + the replacement sweep).
+    report = shipment_sync.sync_order(
+        ext_order, p17=p17, at=at, loc_names=_loc_map(), order_row_id=order_row,
+        dry_run=False, srs=shipments)
+    created = sum(1 for a in report["actions"] if a["phase"] == "sr" and a["action"] == "create")
+    updated = sum(1 for a in report["actions"] if a["action"] == "update")
+    n = len(shipments)
     note = ""
     if not order_row:
         note = " (Order Link left empty — repair the order so shipments can link to it)"
-    diagnosis = (f"Re-synced {n} shipping request(s) for {ext_order} from Pipe17."
-                 + (" " + "; and ".join(reasons) + "." if reasons else ""))
+    orphans = [sid for sid, r in report["plan"].items() if r["orphaned"]]
+    if orphans:
+        note += f" Orphaned canceled request(s): {', '.join(orphans)}."
+    diagnosis = (f"Re-synced {n} shipping request(s) for {ext_order} from Pipe17, keyed on "
+                 "shipping request ID." + (" " + "; and ".join(reasons) + "." if reasons else ""))
     return _result(kind="sr", found=True, eligible=not untagged, healed=n > 0,
                    status=REPAIR_STATUS_HEALED if n else REPAIR_STATUS_REVIEW,
                    diagnosis=diagnosis,
-                   outcome=f"Upserted {n} shipping request row(s) from Pipe17{note}.")
+                   outcome=(f"{created} row(s) created, {updated} row update(s) for "
+                            f"{n} shipping request(s){note}"))
 
 
 def diagnose_and_heal(pipe17_id, kind="auto", force=False, dry_run=False):

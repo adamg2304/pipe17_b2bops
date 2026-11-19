@@ -4,7 +4,7 @@ from config import (
     LOCATION_MAP, STATUS_MAP, DEFAULT_SHIPMENT_STATUS, NORMALIZE_SHIPMENT_NUMBER,
     F_SHIPMENT_NUMBER, F_CUSTOMER_NAME, F_DELIVERY_ADDRESS, F_CITY, F_ZIP_CODE,
     F_CUSTOMER_EMAIL, F_LINE_ITEMS, F_STATE, F_ORIGIN_WH, F_STATUS,
-    F_SHIPMENT_CREATION_DATE, F_PIPE17_REQUEST_LINK,
+    F_SHIPMENT_CREATION_DATE, F_PIPE17_REQUEST_LINK, F_SHIP_REQUEST_ID,
     WRITE_CROSSLINKS, PIPE17_APP_BASE, PIPE17_APP_ORG, PIPE17_SHIPMENT_URL_TMPL,
 )
 
@@ -33,6 +33,8 @@ def shipment_to_airtable(sr, location_map=None):
     addr = sr.get("shippingAddress") or {}
     name = " ".join(x for x in [addr.get("firstName"), addr.get("lastName")] if x).strip()
     fields = {
+        # The upsert key. Shipment Number below is display-only (Pipe17 reuses it).
+        F_SHIP_REQUEST_ID: sr.get("shipmentId"),
         F_SHIPMENT_NUMBER: normalize_shipment_number(sr.get("extShipmentId")),
         F_CUSTOMER_NAME: name or None,
         F_DELIVERY_ADDRESS: addr.get("address1"),

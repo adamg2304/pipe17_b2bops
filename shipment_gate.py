@@ -1,12 +1,11 @@
-"""Decide which Pipe17 shipping request owns an Airtable Shipments row, and which of its
-fields it may write. Pure functions; no network. See SR_COMMITTED_STATUSES in config.py.
+"""Which fields a Pipe17 shipping request may write on its Airtable Shipments row.
+Pure functions; no network. See SR_COMMITTED_STATUSES in config.py.
 
-Two problems this guards against:
-  1. A provisional SR (not yet sent to fulfillment) overwriting the warehouse, line
-     items or creation date of a row. Its warehouse is often a virtual backorder
-     location that Pipe17 will change before it ships.
-  2. Two SRs sharing one extShipmentId (Pipe17 cancels an SR and re-creates one under
-     the same number). Only one can own the row; the live one wins.
+Rows are keyed on the shipping request ID (see shipment_sync), so each SR owns exactly one
+row and no SR can overwrite another's. What remains here is the provisional-SR rule: an SR
+not yet sent to fulfillment (often on a virtual backorder location Pipe17 will change)
+must not overwrite the warehouse, line items or creation date of an EXISTING row, which
+also keeps a hand-corrected Origin WH in place until the SR is actually sent.
 """
 from config import (
     SR_COMMITTED_STATUSES, SR_CANCELED_STATUSES,
@@ -23,29 +22,6 @@ def is_committed(sr):
 
 def is_canceled(sr):
     return (sr or {}).get("status") in SR_CANCELED_STATUSES
-
-
-def _rank(sr):
-    """Higher wins: live beats canceled, committed beats provisional, newer beats older."""
-    return (not is_canceled(sr), is_committed(sr), (sr or {}).get("updatedAt") or "")
-
-
-def prefer(a, b):
-    """Of two SRs with the same shipment number, return the one that should own the row."""
-    if a is None:
-        return b
-    if b is None:
-        return a
-    return b if _rank(b) > _rank(a) else a
-
-
-def pick_owner(srs, ext_shipment_id):
-    """The SR that owns `ext_shipment_id` among `srs` (all SRs of one order), or None."""
-    owner = None
-    for s in srs or []:
-        if s.get("extShipmentId") == ext_shipment_id:
-            owner = prefer(owner, s)
-    return owner
 
 
 def gate_routing_fields(fields, sr, row_exists):

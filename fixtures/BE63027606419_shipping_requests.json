@@ -1,0 +1,445 @@
+{
+ "_source": "Pipe17 list-shipping-requests extOrderId=#BE63027606419, read 2026-11-18",
+ "shipments": [
+  {
+   "extOrderId": "#BE63027606419",
+   "orderId": "810ec5d606bdc6c0",
+   "tags": [
+    "Airtable",
+    "White Glove",
+    "B2B",
+    "LTL"
+   ],
+   "shippingAddress": {
+    "firstName": "Test",
+    "lastName": "Customer",
+    "city": "San Francisco",
+    "stateOrProvince": "CA",
+    "zipCodeOrPostalCode": "94111"
+   },
+   "shipmentId": "cead8dd5563caab7",
+   "extShipmentId": "#BE63027606419",
+   "status": "fulfilled",
+   "locationId": "34b98f63b3ad51f6",
+   "fulfillmentIntegrationId": "ac2828fbaa3d2a0e",
+   "createdAt": "2026-10-30T00:48:02.661Z",
+   "updatedAt": "2026-11-09T20:42:32.044Z",
+   "sentToFulfillmentAt": "2026-10-30T16:44:48.124Z",
+   "lineItems": [
+    {
+     "uniqueId": "line-1_1",
+     "sku": "99-05-09-88",
+     "quantity": 1,
+     "name": "Mid Leg - Team"
+    },
+    {
+     "uniqueId": "line-1_2",
+     "sku": "99-80-15-77",
+     "quantity": 2,
+     "name": "Conference Table - Board for 10-12 / Top / Woodgrain"
+    },
+    {
+     "uniqueId": "line-1_3",
+     "sku": "88-03-00-99",
+     "quantity": 1,
+     "name": "Leg - White / CP 4"
+    },
+    {
+     "uniqueId": "line-1_4",
+     "sku": "88-01-15-88",
+     "quantity": 1,
+     "name": "Conference Table - Board for 10-12 / Full Frame"
+    },
+    {
+     "uniqueId": "line-2_1",
+     "sku": "99-80-10-77",
+     "quantity": 1,
+     "name": "Conference Table - Team for 6-8 / Top / Woodgrain"
+    },
+    {
+     "uniqueId": "line-2_2",
+     "sku": "88-03-00-99",
+     "quantity": 1,
+     "name": "Leg - White / CP 4"
+    },
+    {
+     "uniqueId": "line-2_3",
+     "sku": "88-01-10-88",
+     "quantity": 1,
+     "name": "Conference Table - Team for 6-8 / Full Frame"
+    },
+    {
+     "uniqueId": "line-3_1",
+     "sku": "99-07-00-99",
+     "quantity": 3,
+     "name": "Standing Desk - Base / White"
+    },
+    {
+     "uniqueId": "line-3_2",
+     "sku": "99-81-68-99",
+     "quantity": 3,
+     "name": "Standing Desk - Executive / Top / White"
+    },
+    {
+     "uniqueId": "line-4",
+     "sku": "14-04-00-99",
+     "quantity": 1,
+     "name": "Credenza - Left / White"
+    },
+    {
+     "uniqueId": "line-5",
+     "sku": "14-03-00-99",
+     "quantity": 2,
+     "name": "Credenza - Right / White"
+    },
+    {
+     "uniqueId": "line-9",
+     "sku": "11-11-00-58",
+     "quantity": 8,
+     "name": "Daily Chair - Dune Vegan Leather / White"
+    },
+    {
+     "uniqueId": "line-10",
+     "sku": "11-13-02-06",
+     "quantity": 12,
+     "name": "Softside Chair - High Back / Canyon Vegan Leather / Chrome Base"
+    },
+    {
+     "uniqueId": "line-11",
+     "sku": "15-03-00-03",
+     "quantity": 2,
+     "name": "Oppo Lounge Chair - Leather / Canyon"
+    },
+    {
+     "uniqueId": "line-12",
+     "sku": "15-04-00-04",
+     "quantity": 1,
+     "name": "Focal Sofa - Fabric / Alloy"
+    },
+    {
+     "uniqueId": "line-13",
+     "sku": "12-08-00-06",
+     "quantity": 1,
+     "name": "Nested Side Table - Standard / Woodgrain / Tofu"
+    },
+    {
+     "uniqueId": "line-14",
+     "sku": "12-07-01-06",
+     "quantity": 1,
+     "name": "Nested Coffee Table - Medium / Woodgrain / Tofu"
+    },
+    {
+     "uniqueId": "line-15",
+     "sku": "12-07-02-06",
+     "quantity": 1,
+     "name": "Nested Coffee Table - Large / Woodgrain / Tofu"
+    }
+   ]
+  },
+  {
+   "extOrderId": "#BE63027606419",
+   "orderId": "810ec5d606bdc6c0",
+   "tags": [
+    "Airtable",
+    "White Glove",
+    "B2B",
+    "LTL"
+   ],
+   "shippingAddress": {
+    "firstName": "Test",
+    "lastName": "Customer",
+    "city": "San Francisco",
+    "stateOrProvince": "CA",
+    "zipCodeOrPostalCode": "94111"
+   },
+   "shipmentId": "604e19849f556c56",
+   "extShipmentId": "#BE63027606419.2",
+   "status": "fulfilled",
+   "locationId": "7e17305c31fc642e",
+   "fulfillmentIntegrationId": "ac2828fbaa3d2a0e",
+   "createdAt": "2026-10-30T00:48:02.793Z",
+   "updatedAt": "2026-11-10T19:42:28.079Z",
+   "sentToFulfillmentAt": "2026-10-30T16:44:52.508Z",
+   "lineItems": [
+    {
+     "uniqueId": "line-16",
+     "sku": "13-11-00-00",
+     "quantity": 6,
+     "name": "In-Desk Power - Standard"
+    }
+   ]
+  },
+  {
+   "extOrderId": "#BE63027606419",
+   "orderId": "810ec5d606bdc6c0",
+   "tags": [
+    "Airtable",
+    "White Glove",
+    "B2B",
+    "LTL"
+   ],
+   "shippingAddress": {
+    "firstName": "Test",
+    "lastName": "Customer",
+    "city": "San Francisco",
+    "stateOrProvince": "CA",
+    "zipCodeOrPostalCode": "94111"
+   },
+   "shipmentId": "0c64cbec5be41092",
+   "extShipmentId": "#BE63027606419.3",
+   "status": "sentToFulfillment",
+   "locationId": "34b98f63b3ad51f6",
+   "fulfillmentIntegrationId": "ac2828fbaa3d2a0e",
+   "createdAt": "2026-11-03T14:19:10.691Z",
+   "updatedAt": "2026-11-04T23:39:32.837Z",
+   "sentToFulfillmentAt": "2026-11-04T23:34:48.703Z",
+   "lineItems": [
+    {
+     "uniqueId": "line-6",
+     "sku": "14-04-00-77",
+     "quantity": 1,
+     "name": "Credenza - Left / Woodgrain"
+    }
+   ]
+  },
+  {
+   "extOrderId": "#BE63027606419",
+   "orderId": "810ec5d606bdc6c0",
+   "tags": [
+    "Airtable",
+    "White Glove",
+    "B2B",
+    "LTL"
+   ],
+   "shippingAddress": {
+    "firstName": "Test",
+    "lastName": "Customer",
+    "city": "San Francisco",
+    "stateOrProvince": "CA",
+    "zipCodeOrPostalCode": "94111"
+   },
+   "shipmentId": "d80e16ccb89961a5",
+   "extShipmentId": "#BE63027606419",
+   "status": "canceledRestock",
+   "locationId": "8f1d050785329517",
+   "fulfillmentIntegrationId": "no-fulfillment-integration",
+   "excludeFromReuse": true,
+   "createdAt": "2026-11-05T15:13:24.905Z",
+   "updatedAt": "2026-11-05T17:36:46.282Z",
+   "canceledAt": "2026-11-05T17:31:41.632Z",
+   "lineItems": [
+    {
+     "uniqueId": "line-7",
+     "sku": "14-03-00-77",
+     "quantity": 1,
+     "name": "Credenza - Right / Woodgrain"
+    },
+    {
+     "uniqueId": "line-8",
+     "sku": "11-01-00-54",
+     "quantity": 4,
+     "name": "Ergonomic Chair - Graphite / White / Standard"
+    }
+   ]
+  },
+  {
+   "extOrderId": "#BE63027606419",
+   "orderId": "810ec5d606bdc6c0",
+   "tags": [
+    "Airtable",
+    "White Glove",
+    "B2B",
+    "LTL"
+   ],
+   "shippingAddress": {
+    "firstName": "Test",
+    "lastName": "Customer",
+    "city": "San Francisco",
+    "stateOrProvince": "CA",
+    "zipCodeOrPostalCode": "94111"
+   },
+   "shipmentId": "357c27692e38bf57",
+   "extShipmentId": "#BE63027606419.2",
+   "status": "canceledRestock",
+   "locationId": "8f1d050785329517",
+   "fulfillmentIntegrationId": "no-fulfillment-integration",
+   "excludeFromReuse": true,
+   "createdAt": "2026-11-05T17:43:18.364Z",
+   "updatedAt": "2026-11-12T23:49:37.920Z",
+   "canceledAt": "2026-11-12T23:47:23.625Z",
+   "lineItems": [
+    {
+     "uniqueId": "line-7",
+     "sku": "14-03-00-77",
+     "quantity": 1,
+     "name": "Credenza - Right / Woodgrain"
+    },
+    {
+     "uniqueId": "line-8",
+     "sku": "11-01-00-54",
+     "quantity": 4,
+     "name": "Ergonomic Chair - Graphite / White / Standard"
+    }
+   ]
+  }
+ ],
+ "locations": {
+  "34b98f63b3ad51f6": "Inland Star - Visalia (VIS)",
+  "7e17305c31fc642e": "Tradewinds - Westfield (TRW)",
+  "8f1d050785329517": "US Backorders B2B"
+ },
+ "airtable_rows_2026_11_18": [
+  {
+   "id": "rec0HOQvanaQp2YDt",
+   "createdTime": "2026-11-03T14:31:00.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419.3",
+    "fldlOvl9BxQsoEow9": "Inland Star - Visalia (VIS)",
+    "fldrmuH8qsLeBDAtr": "1 x 14-04-00-77 - Credenza - Left / Woodgrain",
+    "fldn5soXXtCFKA3K1": "Freight Request Sent",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419.3",
+    "fldAR0iUA9liD09QA": "2026-11-03"
+   }
+  },
+  {
+   "id": "recN3ByfNCxMPIrew",
+   "createdTime": "2026-10-30T01:00:54.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419",
+    "fldlOvl9BxQsoEow9": "Inland Star - Visalia (VIS)",
+    "fldrmuH8qsLeBDAtr": "1 x 99-05-09-88 - Mid Leg - Team; 2 x 99-80-15-77 - Conference Table - Board for 10-12 / Top / Woodgrain; 1 x 88-03-00-99 - Leg - White / CP 4; 1 x 88-01-15-88 - Conference Table - Board for 10-12 / Full Frame; 1 x 99-80-10-77 - Conference Table - Team for 6-8 / Top / Woodgrain; 1 x 88-03-00-99 - Leg - White / CP 4; 1 x 88-01-10-88 - Conference Table - Team for 6-8 / Full Frame; 3 x 99-07-00-99 - Standing Desk - Base / White; 3 x 99-81-68-99 - Standing Desk - Executive / Top / White; 1 x 14-04-00-99 - Credenza - Left / White; 2 x 14-03-00-99 - Credenza - Right / White; 8 x 11-11-00-58 - Daily Chair - Dune Vegan Leather / White; 12 x 11-13-02-06 - Softside Chair - High Back / Canyon Vegan Leather / Chrome Base; 2 x 15-03-00-03 - Oppo Lounge Chair - Leather / Canyon; 1 x 15-04-00-04 - Focal Sofa - Fabric / Alloy; 1 x 12-08-00-06 - Nested Side Table - Standard / Woodgrain / Tofu; 1 x 12-07-01-06 - Nested Coffee Table - Medium / Woodgrain / Tofu; 1 x 12-07-02-06 - Nested Coffee Table - Large / Woodgrain / Tofu",
+    "fldn5soXXtCFKA3K1": "In-Transit",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419",
+    "fldAR0iUA9liD09QA": "2026-10-30"
+   }
+  },
+  {
+   "id": "recbETsKPT1Ln7RzM",
+   "createdTime": "2026-10-30T01:00:54.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419.2",
+    "fldlOvl9BxQsoEow9": "Tradewinds - Westfield (TRW)",
+    "fldrmuH8qsLeBDAtr": "6 x 13-11-00-00 - In-Desk Power - Standard",
+    "fldn5soXXtCFKA3K1": "In-Transit",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419.2",
+    "fldAR0iUA9liD09QA": "2026-10-30"
+   }
+  }
+ ],
+ "airtable_rows_2026_11_09_overwritten": [
+  {
+   "id": "rec0HOQvanaQp2YDt",
+   "createdTime": "2026-11-03T14:31:00.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419.3",
+    "fldlOvl9BxQsoEow9": "Inland Star - Visalia (VIS)",
+    "fldrmuH8qsLeBDAtr": "1 x 14-04-00-77 - Credenza - Left / Woodgrain",
+    "fldn5soXXtCFKA3K1": "Freight Request Sent",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419.3",
+    "fldAR0iUA9liD09QA": "2026-11-03"
+   }
+  },
+  {
+   "id": "recN3ByfNCxMPIrew",
+   "createdTime": "2026-10-30T01:00:54.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419",
+    "fldlOvl9BxQsoEow9": "US Backorders B2B",
+    "fldrmuH8qsLeBDAtr": "1 x 14-03-00-77 - Credenza - Right / Woodgrain; 4 x 11-01-00-54 - Ergonomic Chair - Graphite / White / Standard",
+    "fldn5soXXtCFKA3K1": "Booked",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419",
+    "fldAR0iUA9liD09QA": "2026-10-30"
+   }
+  },
+  {
+   "id": "recbETsKPT1Ln7RzM",
+   "createdTime": "2026-10-30T01:00:54.000Z",
+   "fields": {
+    "fldAo9nWuRVj9lG7p": "#BE63027606419.2",
+    "fldlOvl9BxQsoEow9": "US Backorders B2B",
+    "fldrmuH8qsLeBDAtr": "1 x 14-03-00-77 - Credenza - Right / Woodgrain; 4 x 11-01-00-54 - Ergonomic Chair - Graphite / White / Standard",
+    "fldn5soXXtCFKA3K1": "Booked",
+    "fldEWt9Sq7Q41vydM": "https://app.pipe17.com/d6490d20e53e3811/orders/shipments?search=BE63027606419.2",
+    "fldAR0iUA9liD09QA": "2026-10-30"
+   }
+  }
+ ],
+ "_source_airtable": "Airtable Shipments rows for #BE63027606419 read 2026-11-18; the 11-09 set is the overwritten state seen in that week's investigation.",
+ "order": {
+  "extOrderId": "#BE63027606419",
+  "orderId": "810ec5d606bdc6c0",
+  "status": "partialFulfillment",
+  "routingStatus": "pendingInventory",
+  "lineItems": [
+   {
+    "uniqueId": "line-1",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-2",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-3",
+    "quantity": 3
+   },
+   {
+    "uniqueId": "line-4",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-5",
+    "quantity": 2
+   },
+   {
+    "uniqueId": "line-6",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-7",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-8",
+    "quantity": 4
+   },
+   {
+    "uniqueId": "line-9",
+    "quantity": 8
+   },
+   {
+    "uniqueId": "line-10",
+    "quantity": 12
+   },
+   {
+    "uniqueId": "line-11",
+    "quantity": 2
+   },
+   {
+    "uniqueId": "line-12",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-13",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-14",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-15",
+    "quantity": 1
+   },
+   {
+    "uniqueId": "line-16",
+    "quantity": 6
+   },
+   {
+    "uniqueId": "line-17",
+    "quantity": 1
+   }
+  ],
+  "_dispositions_line_7_8": "line-7: unrouted 1 / canceled 2; line-8: unrouted 4 / canceled 8 (Pipe17, 2026-11-18)"
+ }
+}

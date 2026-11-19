@@ -5,7 +5,8 @@ Run: PIPE17_API_KEY=x AIRTABLE_API_KEY=x HUBSPOT_TOKEN=x python3 selftest_shipme
 """
 import main
 from config import (SHIP_PACKING_LIST_ATTACH as FILE, SHIP_DETAILS_LINK as LINK,
-                    SHIPMENT_NUMBER_FIELD as NUM, F_LINE_ITEMS, F_PIPE17_REQUEST_LINK as P17)
+                    SHIPMENT_NUMBER_FIELD as NUM, F_LINE_ITEMS, F_PIPE17_REQUEST_LINK as P17,
+                    F_SHIP_REQUEST_ID as KEY)
 
 passed = failed = 0
 
@@ -35,9 +36,14 @@ def reset(bucket=True):
 
 
 def gen(fields, status="sentToFulfillment", prior=None):
+    """Rows are matched to SRs by shipping request ID; `prior` is given by Shipment Number
+    for readability and translated to the same key."""
     num = fields[NUM]
-    sr = {"extShipmentId": num, "status": status}
-    main._generate_packing_lists([{"id": "rec1", "fields": fields}], {num: sr}, prior or {})
+    sid = "sid-" + num.lstrip("#")
+    fields = dict(fields, **{KEY: sid})
+    sr = {"shipmentId": sid, "extShipmentId": num, "status": status}
+    prior = {("sid-" + k.lstrip("#")): v for k, v in (prior or {}).items()}
+    main._generate_packing_lists([{"id": "rec1", "fields": fields}], {sid: sr}, prior)
 
 
 def links_written():

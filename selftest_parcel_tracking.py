@@ -4,7 +4,8 @@ Run: HUBSPOT_TOKEN=x PIPE17_API_KEY=x AIRTABLE_API_KEY=x python3 selftest_parcel
 """
 import parcel_tracking as pt
 from config import (
-    F_STATUS, F_PARCEL_TRACKING, SHIP_STATUS_IN_TRANSIT, SHIPMENT_NUMBER_NAME,
+    F_STATUS, F_PARCEL_TRACKING, SHIP_STATUS_IN_TRANSIT, SHIP_REQUEST_ID_NAME,
+    F_SHIPMENT_NUMBER,
 )
 
 passed = failed = 0
@@ -104,24 +105,26 @@ check("human status preserved", F_STATUS not in p)
 p = pt.plan_shipment_update(None, None, ["1Z-A"])
 check("blank status advances to In-Transit", p.get(F_STATUS) == SHIP_STATUS_IN_TRANSIT)
 
-# ---- reconcile (end-to-end with fakes; update-only, SR resolution) --------
+# ---- reconcile (end-to-end with fakes; update-only, keyed on shipmentId) --
 class FakeP17:
-    def __init__(self, sr_map):
-        self.sr_map = sr_map        # ext_order -> list of SRs
+    """reconcile must not need Pipe17 at all now: the fulfillment's shipmentId is the key."""
+    def __init__(self):
         self.calls = []
 
     def get_order_shipments(self, ext_order):
         self.calls.append(ext_order)
-        return self.sr_map.get(ext_order, [])
+        return []
 
 
 class FakeAT:
     def __init__(self, records):
-        self.records = records      # ext_shipment -> record dict (or missing)
+        self.records = records      # shipmentId -> record dict (or missing)
         self.writes = []
+        self.lookups = []
 
     def find_record(self, table, field_name, value):
-        assert field_name == SHIPMENT_NUMBER_NAME
+        self.lookups.append((field_name, value))
+        assert field_name == SHIP_REQUEST_ID_NAME, "parcel rows must be found by shipmentId"
         return self.records.get(value)
 
     def update_record(self, table, record_id, fields):
@@ -129,34 +132,37 @@ class FakeAT:
         return {"id": record_id}
 
 
-# SID1 -> SR extShipmentId "#BE1-S1" (the Airtable Shipment Number); that row is "Processing".
-p17 = FakeP17({"#BE1": [{"shipmentId": "SID1", "extShipmentId": "#BE1-S1"}]})
-at = FakeAT({"#BE1-S1": {"id": "recAAA", "fields": {F_STATUS: "Processing"}}})
+def _row(rid, status="Processing", number="#BE1-S1"):
+    return {"id": rid, "fields": {F_STATUS: status, F_SHIPMENT_NUMBER: number}}
+
+
+p17 = FakeP17()
+at = FakeAT({"SID1": _row("recAAA")})
 counts, updates = pt.reconcile(FFS, p17, at, dry_run=False, require_tag="Airtable")
 check("reconcile updated exactly 1", counts["updated"] == 1)
 check("reconcile wrote to recAAA", at.writes and at.writes[0][0] == "recAAA")
 check("reconcile wrote In-Transit + tracking",
       at.writes[0][1].get(F_STATUS) == SHIP_STATUS_IN_TRANSIT
       and at.writes[0][1].get(F_PARCEL_TRACKING) == "1Z-A, 1Z-SHARED, 1Z-B")
-check("reconcile resolved SRs once per order", p17.calls == ["#BE1"])
+check("reconcile looked the row up by shipmentId", at.lookups == [(SHIP_REQUEST_ID_NAME, "SID1")])
+check("reconcile made no Pipe17 SR calls", p17.calls == [])
+check("update reports the Shipment Number for logging", updates[0][0] == "#BE1-S1")
+
+# A row that only shares the Shipment Number (different SR) is never matched.
+at_other = FakeAT({"OTHER-SID": _row("recOTHER")})
+counts_o, _ = pt.reconcile(FFS, FakeP17(), at_other, dry_run=False, require_tag="Airtable")
+check("row with same number but different shipmentId not touched", at_other.writes == [])
+check("...and counted not_in_airtable", counts_o["not_in_airtable"] == 1)
 
 # Shipment not in Airtable -> never created, counted not_in_airtable.
 at2 = FakeAT({})
-counts2, _ = pt.reconcile(FFS, FakeP17({"#BE1": [{"shipmentId": "SID1", "extShipmentId": "#BE1-S1"}]}),
-                          at2, dry_run=False, require_tag="Airtable")
+counts2, _ = pt.reconcile(FFS, FakeP17(), at2, dry_run=False, require_tag="Airtable")
 check("missing Airtable row -> no write (update-only)", at2.writes == [])
 check("missing Airtable row counted", counts2["not_in_airtable"] == 1)
 
-# No SR match for the shipmentId -> skipped (no_sr), no write.
-at3 = FakeAT({"#BE1-S1": {"id": "recAAA", "fields": {F_STATUS: "Processing"}}})
-counts3, _ = pt.reconcile(FFS, FakeP17({"#BE1": []}), at3, dry_run=False, require_tag="Airtable")
-check("no SR resolution -> no write", at3.writes == [])
-check("no SR resolution counted", counts3["no_sr"] == 1)
-
 # Dry-run -> plans but writes nothing.
-at4 = FakeAT({"#BE1-S1": {"id": "recAAA", "fields": {F_STATUS: "Processing"}}})
-counts4, updates4 = pt.reconcile(FFS, FakeP17({"#BE1": [{"shipmentId": "SID1", "extShipmentId": "#BE1-S1"}]}),
-                                 at4, dry_run=True, require_tag="Airtable")
+at4 = FakeAT({"SID1": _row("recAAA")})
+counts4, updates4 = pt.reconcile(FFS, FakeP17(), at4, dry_run=True, require_tag="Airtable")
 check("dry-run writes nothing", at4.writes == [])
 check("dry-run counts would_update", counts4["would_update"] == 1 and counts4["updated"] == 0)
 
