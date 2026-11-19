@@ -68,6 +68,11 @@ python backfill_shipment_ids.py                      # dry run; writes backfill_
 python backfill_shipment_ids.py --order '#BE63027606419'
 python backfill_shipment_ids.py --apply              # write the unambiguous matches
 ```
+To run it in GCP: **Run Cloud Run Job** workflow, job `pipe17-airtable-sync`, args
+`backfill_shipment_ids.py` (add `,--apply` to write), `log_lines` `2000`. Every row it
+can't resolve is logged as a `BACKFILL_UNRESOLVED {json}` line (same columns as the CSV),
+followed by a count per reason; the CSV itself stays in the container.
+
 For each unkeyed Pipe17 row it scores the SRs with the row's Shipment Number on line
 items (SKU + qty from the Line Items text; Airtable never stored line IDs), Origin WH, and
 creation time (an SR created after the row cannot own it, which catches rows a later SR

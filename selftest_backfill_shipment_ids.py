@@ -124,5 +124,31 @@ at2 = FakeAT(FIX["airtable_rows_2026_11_18"])
 bf.run(FakeP17(), at2, LOCS, apply=False, csv_path=path, only_order="#BE99")
 check("--order filters to that order's rows", at2.writes == [])
 
+# ---- unresolved rows are logged one JSON line each (Cloud Run has no CSV to read)
+import logging  # noqa: E402
+
+
+class _Cap(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+
+
+cap = _Cap()
+bf.log.addHandler(cap)
+bf.log.setLevel(logging.INFO)
+bf.run(FakeP17(), FakeAT(FIX["airtable_rows_2026_11_09_overwritten"]), LOCS, csv_path=path)
+bf.log.removeHandler(cap)
+logged = [json.loads(l.split(" ", 1)[1]) for l in cap.lines if l.startswith("BACKFILL_UNRESOLVED ")]
+check("each unresolved row logged as one JSON line",
+      sorted(r["shipment_number"] for r in logged) == ["#BE63027606419", "#BE63027606419.2"])
+check("logged line carries reason + suggestion",
+      {r["suggested_shipment_id"] for r in logged} == {"cead8dd5563caab7", "604e19849f556c56"})
+check("summary line counts by reason",
+      any("no_exact_match=2" in l for l in cap.lines))
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

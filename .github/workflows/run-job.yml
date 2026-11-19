@@ -29,6 +29,10 @@ on:
         description: "Wait for the run to finish (surfaces pass/fail here)"
         type: boolean
         default: true
+      log_lines:
+        description: "How many recent log lines to print after the run (raise for the shipment ID backfill, e.g. 2000)"
+        type: string
+        default: "60"
 
 env:
   GCP_PROJECT: pipe17-b2bops
@@ -68,9 +72,11 @@ jobs:
         if: always()
         env:
           JOB: ${{ inputs.job }}
+          LOG_LINES: ${{ inputs.log_lines }}
         run: |
-          echo "=== recent logs for $JOB (last 10m) ==="
+          case "$LOG_LINES" in ''|*[!0-9]*) LOG_LINES=60 ;; esac
+          echo "=== recent logs for $JOB (last $LOG_LINES lines, 20m) ==="
           gcloud logging read \
             "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\"" \
-            --project "$GCP_PROJECT" --limit 60 --freshness=20m \
+            --project "$GCP_PROJECT" --limit "$LOG_LINES" --freshness=20m \
             --format='value(timestamp,severity,textPayload,jsonPayload.message)' --order=desc || true

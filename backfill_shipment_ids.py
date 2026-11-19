@@ -20,7 +20,9 @@ The ID is written only when exactly one SR passes all three and no other row in 
 order claims it. Everything else goes to the CSV with the reason, every candidate's
 scores, and a suggested ID when exactly one candidate is time-consistent.
 
-Usage:
+Usage (locally, or as the pipe17-airtable-sync job via the "Run Cloud Run Job" workflow
+with args `backfill_shipment_ids.py` and log_lines raised; every unresolved row is logged
+as a `BACKFILL_UNRESOLVED {json}` line):
   python backfill_shipment_ids.py                         # dry run, all rows
   python backfill_shipment_ids.py --order '#BE63027606419'
   python backfill_shipment_ids.py --csv /tmp/backfill.csv
@@ -29,6 +31,7 @@ Usage:
 import argparse
 import csv
 import datetime as dt
+import json
 import logging
 import re
 import sys
@@ -182,9 +185,17 @@ def run(p17, at, loc_names, *, apply=False, only_order=None, csv_path="backfill_
     matches, unresolved = plan_backfill(rows, srs_by_order, loc_names, claimed - {None})
     for rid, sid, num in matches:
         log.info("%s %s %s -> %s", "WRITE" if apply else "[DRY_RUN] would write", rid, num, sid)
+    # Each unresolved row is also logged as one JSON line (same columns as the CSV), so a
+    # Cloud Run execution, whose local CSV is lost with the container, can be reviewed from
+    # its logs: filter on BACKFILL_UNRESOLVED. No customer name/address/email is included.
+    for row in unresolved:
+        log.info("BACKFILL_UNRESOLVED %s",
+                 json.dumps({k: row.get(k, "") for k in CSV_COLUMNS}, sort_keys=False))
     write_csv(csv_path, unresolved)
-    log.info("Backfill: %d unambiguous match(es), %d to review in %s",
-             len(matches), len(unresolved), csv_path)
+    by_reason = Counter(u["reason"] for u in unresolved)
+    log.info("Backfill: %d unambiguous match(es), %d to review (%s) in %s",
+             len(matches), len(unresolved),
+             ", ".join(f"{r}={n}" for r, n in sorted(by_reason.items())) or "none", csv_path)
     if apply and matches:
         at.update_records(SHIPMENTS_TABLE, [(rid, {F_SHIP_REQUEST_ID: sid}) for rid, sid, _ in matches])
         log.info("Backfill: wrote %d shipping request ID(s)", len(matches))
