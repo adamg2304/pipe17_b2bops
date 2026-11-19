@@ -43,6 +43,11 @@ F_PIPE17_REQUEST_LINK = "fldEWt9Sq7Q41vydM"   # Pipe17 Shipping Request deep lin
 # extShipmentId ("Shipment Number") is display-only: Pipe17 reuses it when a backorder SR
 # is canceled and re-routed, so it can't identify a row. Nothing matches on it alone.
 F_SHIP_REQUEST_ID = os.environ.get("F_SHIP_REQUEST_ID", "fldffkU7iYRmCfyKz")    # singleLineText
+# Rollout switch. Off: the scheduled/reconcile shipment sync logs that it is paused and
+# writes nothing (single-order --order runs and the ID backfill still work). Turn it on
+# only after backfill_shipment_ids.py --apply, or every unkeyed row gets a duplicate the
+# next time its SR changes. Set in deploy-cloud-run.yml (--set-env-vars) to persist.
+SHIPMENTS_KEYED_SYNC = os.environ.get("SHIPMENTS_KEYED_SYNC", "false").lower() == "true"
 SHIP_REQUEST_ID_NAME = os.environ.get("SHIP_REQUEST_ID_NAME", "Pipe17 Shipping Request ID")
 # Replacement sweep fields (env-overridable; set an ID to "" to stop writing that field).
 #   Replaced By — link to Shipments (on the canceled row: the live SR row(s) that took

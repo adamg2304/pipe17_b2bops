@@ -346,6 +346,11 @@ A_T = dict(A, tags=["Airtable"], extOrderId="#O1")
 B_U = dict(B, tags=["Parcel"], extOrderId="#O1")      # replacement routed WITHOUT the tag
 main.p17, main.at = MainP17([A_T, B_U]), MainAT()
 main.DRY_RUN, main.GENERATE_PACKING_LIST = False, False
+main.SHIPMENTS_KEYED_SYNC = False
+paused = main.sync_shipments("2026-11-01T00:00:00Z", "Airtable")
+check("rollout switch off: shipment sync paused, nothing written",
+      paused.get("paused") and not main.at.rows and not main.at.upserts)
+main.SHIPMENTS_KEYED_SYNC = True
 main._location_names = lambda: LOCS
 main.notify.slack = lambda text: None
 totals = main.sync_shipments("2026-11-01T00:00:00Z", "Airtable")

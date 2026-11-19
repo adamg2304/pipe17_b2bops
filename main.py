@@ -13,7 +13,7 @@ import sys
 from config import (
     SYNC_LOOKBACK_MINUTES, SYNC_ORDERS, DRY_RUN, PIPE17_TAG_FILTER,
     ORDERS_TABLE, SHIPMENTS_TABLE,
-    ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, F_SHIP_REQUEST_ID,
+    ORDER_NUMBER_FIELD, SHIPMENT_NUMBER_FIELD, F_SHIP_REQUEST_ID, SHIPMENTS_KEYED_SYNC,
     ORDER_SYNC_STATUSES, ORDER_MERGE_FIELD, O_ORDER_NUMBER,
     GENERATE_ORDER_SLIP, O_ORDER_ATTACHMENTS, O_ORDER_DETAILS,
     GENERATE_PACKING_LIST, SHIP_PACKING_LIST_ATTACH, SHIP_DETAILS_LINK,
@@ -369,7 +369,15 @@ def sync_shipments(since, tag):
     still have an unsettled canceled row (the sweep recheck), then syncs each order as a
     whole. The tag is the only ingestion gate: an order with one tagged SR has ALL its SRs
     synced and swept, whatever their tags, so a replacement routed without the tag is
-    still linked. Per-order failures are logged and never stop the run."""
+    still linked. Per-order failures are logged and never stop the run.
+
+    Paused (writes nothing) until SHIPMENTS_KEYED_SYNC is on, which happens after the
+    shipping request ID backfill has been applied."""
+    if not SHIPMENTS_KEYED_SYNC:
+        log.warning("Shipments sync PAUSED: SHIPMENTS_KEYED_SYNC is off. Run "
+                    "backfill_shipment_ids.py --apply, then set SHIPMENTS_KEYED_SYNC=true.")
+        return {"orders": 0, "creates": 0, "updates": 0, "orphans": 0, "failed": 0,
+                "paused": True}
     loc_names = _location_names()
     orders, skipped = set(), 0
     for sr in p17.iter_shipping_requests(since, tag=tag or None):

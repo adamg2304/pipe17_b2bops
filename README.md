@@ -60,7 +60,14 @@ Check one order without writing:
 DRY_RUN=true python main.py --order '#BE63027606419'
 ```
 
-**Backfill (run once, before deploying the keyed sync).** Existing rows have no shipping
+**Rollout.** The keyed sync ships switched off (`SHIPMENTS_KEYED_SYNC`, default false):
+the scheduled and reconcile shipment sync log "PAUSED" and write nothing, so merging does
+not create duplicates. Order: merge + deploy, run the backfill dry run, review, run it with
+`--apply`, then add `SHIPMENTS_KEYED_SYNC=true` to both pipe17-airtable-sync jobs' env in
+`deploy-cloud-run.yml`. While paused, parcel tracking only updates rows that already have
+an ID, and the reconcile job heals anything the pause missed once it is switched on.
+
+**Backfill (run once, before switching the keyed sync on).** Existing rows have no shipping
 request ID, and the keyed sync never adopts a row by Shipment Number, so un-backfilled rows
 would get a duplicate the next time their SR changes.
 ```bash
