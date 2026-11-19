@@ -101,11 +101,17 @@ print("5) run(): batch read, diff, patch")
 
 
 class FakeAT:
-    def __init__(self, rows):
+    """Window query returns `rows`; family queries (OR(FIND(...))) return rows + family."""
+    def __init__(self, rows, family=()):
         self.rows = rows
+        self.family = list(family)
         self.formula = None
+        self.family_queries = 0
 
     def list_records(self, table, formula, field_ids=None):
+        if formula.startswith("OR("):
+            self.family_queries += 1
+            return self.rows + self.family
         self.formula = formula
         return self.rows
 
@@ -153,8 +159,8 @@ check("unchanged deal not patched", all(d != "100000000200" for d, _ in hs.updat
 check("test order skipped", counts.get("skipped") == 1)
 check("unmapped status counted, not written", counts.get("unmapped") == 1 and all(d != "100000000400" for d, _ in hs.updates))
 check("missing deal counted", counts.get("deal_not_found") == 1)
-check("parent order wins over its split child",
-      ("100000000600", {"operations_status": "Order Scheduled"}) in hs.updates)
+check("deal with parent + split takes the least-finished (split still processing)",
+      ("100000000600", {"operations_status": "Order Processing"}) in hs.updates)
 check("deal without Airtable id found by its order number",
       ("62610815635", {"operations_status": "Order Shipped"}) in hs.updates)
 check("searched order_details with main order numbers",
@@ -165,6 +171,60 @@ check("exactly three writes", len(hs.updates) == 3)
 hs2 = FakeHS({"100000000100": {"operations_status": "Order Processing"}})
 dry = ops.run(90, dry_run=True, at=FakeAT(rows[:1]), hs=hs2)
 check("dry run writes nothing", hs2.updates == [] and dry.get("would_update") == 1)
+
+
+print("5b) deal status across all of a deal's orders (least-finished wins)")
+check("family key: split", ops.family_key({O_ORDER_NUMBER: "#BE15501 - Small Filing Cabinets"}) == "BE15501")
+check("family key: suffixed follow-on", ops.family_key({O_ORDER_NUMBER: "CEN1687.1"}) == "CEN1687")
+check("family key: paren split", ops.family_key({O_ORDER_NUMBER: "#CEN1678 (2)- ergo chairs"}) == "CEN1678")
+check("family key: _REPL stays its own deal", ops.family_key({O_ORDER_NUMBER: "#BE15501_REPL"}) == "BE15501_REPL")
+
+O = lambda num, st, **kw: dict({O_ORDER_NUMBER: num, O_STATUS: st}, **kw)
+pick = lambda orders: ops.pick_deal_status(orders, OPTIONS)[1].get("operations_status")
+check("open split keeps a completed parent open",
+      pick([O("#BE1", "Completed"), O("#BE1 - Tables", "Order Arrived")]) == "Order Arrived")
+check("all orders completed -> Completed",
+      pick([O("#BE1", "Completed"), O("#BE1 - Tables", "Completed")]) == "Completed")
+check("cancelled split does not hold the deal open",
+      pick([O("#BE1", "Completed"), O("#BE1 - Tables", "Canceled")]) == "Completed")
+check("every order cancelled -> Order Canceled",
+      pick([O("#BE1", "Order Canceled"), O("#BE1 - Tables", "Canceled")]) == "Order Canceled")
+check("on hold surfaces first", pick([O("#BE1", "Order Shipped"), O("#BE1 - X", "Order On Hold")]) == "Order On Hold")
+check("unmapped sibling ignored", pick([O("#BE1", "Order Shipped"), O("#BE1 - X", "Mystery")]) == "Order Shipped")
+_, w = ops.pick_deal_status([O("#BE1", "Completed", **{O_SCHEDULED_DELIVERY_DATE: "2026-09-14"}),
+                             O("#BE1 - X", "Order Arrived")], OPTIONS)
+check("delivery extras fall back to the parent order",
+      w == {"operations_status": "Order Arrived", "delivery_date": "2026-09-14"})
+
+# Live examples from 2026-11-19.
+cen_window = [{"id": "w1", "fields": O("CEN1687", "In Review")}]
+cen_family = [{"id": "f1", "fields": O("#CEN1687", "Completed", **{O_COMPLETED_DATE: "2026-10-24"})},
+              {"id": "f2", "fields": O("CEN1687.1", "Order Processing")},
+              {"id": "f3", "fields": O("#CEN16870", "Order Shipped")}]           # FIND overmatch, different family
+hs3 = FakeHS({"62408988317": {"operations_status": "Completed"}})
+at3 = FakeAT(cen_window, cen_family)
+ops.run(30, dry_run=False, at=at3, hs=hs3)
+check("siblings read even when only one order changed", at3.family_queries == 1)
+check("CEN1687: deal shows the least-finished of its three orders",
+      hs3.updates == [("62408988317", {"operations_status": "In Review"})])
+
+b_window = [{"id": "w1", "fields": O("#BE15501 - Small Filing Cabinets", "Completed",
+                                     **{O_HS_DEAL_ID_LOOKUP: ["63027280009"]})}]
+b_family = [{"id": "f1", "fields": O("#BE15501", "Completed", **{O_HS_DEAL_ID_LOOKUP: ["63027280009"]})},
+            {"id": "f2", "fields": O("#BE15501 - Meeting Tables", "Order Arrived",
+                                     **{O_HS_DEAL_ID_LOOKUP: ["63027280009"]})},
+            {"id": "f3", "fields": O("#BE15501 - Other Deal", "Order Processing",
+                                     **{O_HS_DEAL_ID_LOOKUP: ["99999999999"]})}]  # tied to another deal
+hs4 = FakeHS({"63027280009": {"operations_status": "Completed"}})
+ops.run(30, dry_run=False, at=FakeAT(b_window, b_family), hs=hs4)
+check("a split finishing doesn't mark the deal Completed while another split is open",
+      hs4.updates == [("63027280009", {"operations_status": "Order Arrived"})])
+
+hs5 = FakeHS({"63027280009": {"operations_status": "Order Arrived"}})
+done_family = [{"id": "f1", "fields": O("#BE15501", "Completed", **{O_HS_DEAL_ID_LOOKUP: ["63027280009"]})}]
+ops.run(30, dry_run=False, at=FakeAT(b_window, done_family), hs=hs5)
+check("deal goes Completed once every order is Completed",
+      hs5.updates == [("63027280009", {"operations_status": "Completed"})])
 
 
 print("6) Hubspot Deals row fields")

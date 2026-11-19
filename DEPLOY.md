@@ -241,6 +241,12 @@ DUPLICATE / Replacement / MISSING / DAMAGE-TRANSIT / CS-CANCEL tags. The deal st
 never touched. Deal id comes from the Hubspot Deals lookup, then the Hubspot Deal Link,
 then the `#BE` / `#CEN` order number.
 
+**Deals with several orders** (splits like `#BE15501 - Small Filing Cabinets`, follow-ons like
+`CEN1687.1`): every run reads all of the deal's orders, not just the one that changed, and the
+deal shows the least-finished status among them (order in `OPS_STATUS_PROGRESS`). A deal reads
+`Completed` only when every order is. Cancelled orders don't hold a deal open; a deal shows
+`Order Canceled` only when all its orders are cancelled. `_REPL` / `_S` orders are separate deals.
+
 Statuses are written as-is when they match an `operations_status` option. These Airtable
 statuses have no HubSpot option yet, so they leave the deal unchanged and are logged:
 `Order Partially Out of Stock`, `Order Scheduling Email Sent`, `Order Partially Scheduled`,

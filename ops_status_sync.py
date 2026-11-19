@@ -12,7 +12,13 @@ How a run works:
   2. Per order: skip the orders the old automation skipped (test numbers #77/#99,
      duplicate / replacement / claim tags, and rows already Completed-dated but not in
      Completed status). Resolve the HubSpot deal id. Work out the target values.
-  3. Read those deals' current values in one batch and PATCH only what differs, so a run
+  3. A deal can have several orders: splits ("#BE15501 - Small Filing Cabinets"),
+     suffixed orders ("CEN1687.1") and the parent. For every deal touched, all of its
+     orders are read (not just the ones that changed) and the deal gets the
+     LEAST-FINISHED status among them (OPS_STATUS_PROGRESS). Cancelled orders don't count
+     unless every order is cancelled. So a deal reads Completed only when all of its
+     orders are, and the result never depends on which order happened to change.
+  4. Read those deals' current values in one batch and PATCH only what differs, so a run
      that finds nothing new writes nothing.
 
 Status mapping: the Airtable Status is written as-is when it matches an operations_status
@@ -29,6 +35,7 @@ run() takes at / hs injected so the selftest runs offline.
 """
 import logging
 import re
+from collections import defaultdict
 
 from config import (
     ORDERS_TABLE, O_ORDER_NUMBER, O_STATUS, O_ORDER_TAGS, O_HUBSPOT_DEAL_LINK,
@@ -39,6 +46,7 @@ from config import (
     OPS_STATUS_SYNC_EXTRAS, HS_DELIVERY_DATE_PROP, HS_DELIVERY_FRIENDLY_PROP,
     HS_LATESHIPMENT_PROP, HS_ORDER_DETAILS_PROP as HS_ORDER_NUMBER_PROP,
     OPS_STATUS_SKIP_ORDER_SUBSTRINGS, OPS_STATUS_SKIP_TAG_PREFIXES, OPS_STATUS_SKIP_TAGS,
+    OPS_STATUS_PROGRESS, OPS_STATUS_IGNORE, ORDER_NUMBER_FIELD,
 )
 
 log = logging.getLogger("pipe17-airtable")
@@ -179,6 +187,67 @@ def order_number_candidates(fields):
     return [main] if main.startswith("#") else [main, "#" + main]
 
 
+_FAMILY_CUT = re.compile(r"[(\-.\s]")
+_RANK = {v.lower(): i for i, v in enumerate(OPS_STATUS_PROGRESS)}
+_IGNORE = {v.lower() for v in OPS_STATUS_IGNORE}
+
+
+def family_key(fields):
+    """Key shared by a parent order and its splits / suffixed follow-ons: the number
+    without '#', cut at the first "(", "-", "." or space, upper-cased.
+    "#BE15501 - Small Filing Cabinets", "#BE15501" -> "BE15501"; "CEN1687.1",
+    "CEN1687", "#CEN1687" -> "CEN1687". "_REPL" / "_S" orders keep their suffix: they
+    are separate deals."""
+    num = _text(fields.get(O_ORDER_NUMBER)).upper().lstrip("#").strip()
+    return _FAMILY_CUT.split(num, 1)[0].strip() if num else ""
+
+
+def pick_deal_status(orders, options):
+    """(chosen order fields, desired props) for one deal from all of its orders, or
+    (None, {}). The deal takes the least-finished mapped status; cancelled orders count
+    only when nothing else is left. Ties go to the parent order. Delivery extras come
+    from the chosen order, falling back to the parent and then the other orders."""
+    mapped = [(map_status(f, options), f) for f in orders]
+    live = [(st, f) for st, f in mapped if st and st.lower() not in _IGNORE]
+    ranked = [(st, f) for st, f in live if st.lower() in _RANK]
+    pool = ranked or live or [(st, f) for st, f in mapped if st]
+    if not pool:
+        chosen = None
+    else:
+        def key(item):
+            st, f = item
+            return (_RANK.get(st.lower(), len(_RANK)), 0 if is_main_order(f) else 1)
+        chosen = min(pool, key=key)[1]
+    order = ([chosen] if chosen else []) + sorted(
+        (f for f in orders if f is not chosen), key=lambda f: 0 if is_main_order(f) else 1)
+    want = {}
+    for f in order:
+        for k, v in desired_props(f, options).items():
+            if k == HS_OPS_STATUS_PROP and f is not chosen:
+                continue
+            want.setdefault(k, v)
+    return chosen, want
+
+
+def _family_formula(keys):
+    clauses = ['FIND("%s", UPPER({%s}))' % (k, ORDER_NUMBER_FIELD) for k in keys]
+    return "OR(%s)" % ",".join(clauses)
+
+
+def fetch_families(at, keys, chunk=40):
+    """All Orders rows whose family_key is in `keys` (FIND narrows server-side, the exact
+    family match happens here)."""
+    keys = sorted(k for k in keys if k and re.fullmatch(r"[A-Z0-9_]+", k))
+    out = []
+    for i in range(0, len(keys), chunk):
+        part = keys[i:i + chunk]
+        want = set(part)
+        for rec in at.list_records(ORDERS_TABLE, _family_formula(part), field_ids=READ_FIELDS):
+            if family_key(rec.get("fields") or {}) in want:
+                out.append(rec)
+    return out
+
+
 # --- run --------------------------------------------------------------------
 
 def window_formula(minutes):
@@ -209,20 +278,20 @@ def run(lookback_minutes, dry_run, *, at=None, hs=None):
             bump("skipped")
             continue
         deal_id = deal_id_of(f)
-        (resolved if deal_id else missing).append((deal_id, f))
+        (resolved if deal_id else missing).append((deal_id, rec.get("id"), f))
     if missing:
-        wanted = {c for _, f in missing for c in order_number_candidates(f)}
+        wanted = {c for _, _, f in missing for c in order_number_candidates(f)}
         try:
             by_number = hs.find_deal_ids_by_property(HS_ORDER_NUMBER_PROP, wanted) if wanted else {}
         except Exception:
             log.exception("Ops status: deal lookup by %s failed", HS_ORDER_NUMBER_PROP)
             by_number = {}
         unresolved = []
-        for _, f in missing:
+        for _, rid, f in missing:
             deal_id = next((by_number[c] for c in order_number_candidates(f) if c in by_number), None)
             if deal_id:
                 bump("found_by_order_number")
-                resolved.append((deal_id, f))
+                resolved.append((deal_id, rid, f))
             else:
                 unresolved.append(_text(f.get(O_ORDER_NUMBER)))
         if unresolved:
@@ -231,25 +300,47 @@ def run(lookback_minutes, dry_run, *, at=None, hs=None):
             log.warning("Ops status: %d order(s) with no HubSpot deal found, skipped: %s",
                         len(unresolved), sample)
 
-    # One target per deal. Split orders share their parent's deal; when both changed in
-    # the window, the parent row wins so a child can't overwrite the parent's status.
+    # Every touched deal, with ALL of its orders: the changed ones plus their family
+    # (parent / splits / suffixed follow-ons) read fresh from Airtable. A family row that
+    # carries its own deal id for a different deal is left out, as are rows the old
+    # automation skipped.
+    by_deal = defaultdict(dict)
+    deals_by_family = defaultdict(set)
+    for deal_id, rid, f in resolved:
+        by_deal[deal_id][rid] = f
+        deals_by_family[family_key(f)].add(deal_id)
+    deals_by_family.pop("", None)
+    try:
+        family_rows = fetch_families(at, deals_by_family) if deals_by_family else []
+    except Exception:
+        log.exception("Ops status: reading sibling orders failed; using changed orders only")
+        family_rows = []
+    for rec in family_rows:
+        f = rec.get("fields") or {}
+        if skip_reason(f):
+            continue
+        own = deal_id_of(f)
+        for deal_id in deals_by_family.get(family_key(f), ()):
+            if own and own != deal_id:
+                continue
+            by_deal[deal_id].setdefault(rec.get("id"), f)
+
     plan = {}
     unmapped = set()
-    for deal_id, f in resolved:
-        num = _text(f.get(O_ORDER_NUMBER))
-        want = desired_props(f, options)
-        if HS_OPS_STATUS_PROP not in want:
-            unmapped.add(_text(f.get(O_STATUS)))
+    for deal_id, orders in by_deal.items():
+        orders = list(orders.values())
+        unmapped.update(_text(f.get(O_STATUS)) for f in orders if not map_status(f, options))
+        chosen, want = pick_deal_status(orders, options)
         if not want:
             bump("unmapped")
             continue
-        prev = plan.get(deal_id)
-        if prev and is_main_order(prev[1]) and not is_main_order(f):
-            continue
-        plan[deal_id] = (num, f, want)
+        num = _text((chosen or orders[0]).get(O_ORDER_NUMBER))
+        if len(orders) > 1:
+            num += f" (+{len(orders) - 1} related)"
+        plan[deal_id] = (num, chosen, want)
     if unmapped:
-        log.warning("Ops status: Airtable status(es) with no %s option, left unchanged on the "
-                    "deal: %s", HS_OPS_STATUS_PROP, ", ".join(sorted(s for s in unmapped if s)))
+        log.warning("Ops status: Airtable status(es) with no %s option, ignored: %s",
+                    HS_OPS_STATUS_PROP, ", ".join(sorted(s for s in unmapped if s)))
 
     props = sorted({k for _, _, want in plan.values() for k in want})
     current = hs.batch_read_deals(list(plan), props) if plan else {}

@@ -694,3 +694,21 @@ OPS_STATUS_SKIP_TAG_PREFIXES = tuple(
 OPS_STATUS_SKIP_TAGS = tuple(
     s.strip().upper() for s in os.environ.get(
         "OPS_STATUS_SKIP_TAGS", "MISSING,DAMAGE-TRANSIT,CS-CANCEL").split(",") if s.strip())
+
+# --- Deal-level status when a deal has several Airtable orders --------------
+# Splits ("#BE15501 - Small Filing Cabinets"), suffixed orders ("CEN1687.1") and the parent
+# all point at one deal. The deal shows the LEAST-FINISHED of them, so it reads Completed
+# only when every order on it is done. Order of progress, earliest first (HubSpot
+# operations_status values). Override with OPS_STATUS_PROGRESS="a,b,c".
+OPS_STATUS_PROGRESS = tuple(s.strip() for s in os.environ.get("OPS_STATUS_PROGRESS", ",".join([
+    "Order On Hold", "No Shipments Found", "In Review", "Out Of Stock",
+    "Order Partially Out of Stock", "Order Processing", "Order Partially Shipped",
+    "Order Shipped", "Order Partially Arrived", "Order Arrived", "Delivery Date Rejected",
+    "Order Scheduling Email Sent", "Order Partially Scheduled", "Order Scheduled",
+    "Order Partially Delivered", "Delivered with Open Items", "QA",
+    "Order Partially Cancelled", "Completed",
+])).split(",") if s.strip())
+# Cancelled orders don't hold a deal open. The deal only shows one of these when every
+# order on it is cancelled.
+OPS_STATUS_IGNORE = tuple(s.strip() for s in os.environ.get(
+    "OPS_STATUS_IGNORE", "Order Canceled,Canceled").split(",") if s.strip())
