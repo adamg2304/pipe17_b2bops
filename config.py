@@ -509,11 +509,11 @@ INVENTORY_HOLD_ENABLED = os.environ.get("INVENTORY_HOLD_ENABLED", "false").lower
 # HubSpot deal signals.
 HS_INVENTORY_HOLD_PROP = os.environ.get("HS_INVENTORY_HOLD_PROP", "inventory_hold_approved")  # bool
 HS_DEAL_STAGE_PROP = os.environ.get("HS_DEAL_STAGE_PROP", "dealstage")
-# Post-quote, pre-Ready-for-Ops stages where a hold can be placed (Quote Sent,
+# Pre-Ready-for-Ops stages where a hold can be placed (Qualified, Quote Sent,
 # Buyer Engaged, Committed Deal, Deposit Invoice Sent). Env override is comma-sep.
-# Same active sales stages the line-item inventory fan-out uses (minus qualifiedtobuy).
+# Matches the active sales stages the line-item inventory fan-out uses.
 HS_HOLD_STAGE_IDS = tuple(s for s in os.environ.get(
-    "HS_HOLD_STAGE_IDS", "1523817,11586560,1492994,1492995").split(",") if s)
+    "HS_HOLD_STAGE_IDS", "qualifiedtobuy,1523817,11586560,1492994,1492995").split(",") if s)
 HS_READY_FOR_OPS_STAGE_ID = os.environ.get("HS_READY_FOR_OPS_STAGE_ID", HS_DEPOSIT_PAID_STAGE_ID)  # 10492961
 HS_LOST_STAGE_ID = os.environ.get("HS_LOST_STAGE_ID", "closedlost")  # stage supersedes the checkbox
 

@@ -120,7 +120,7 @@ check("hold stage, no checkbox -> withdrawn", hold_sync.classify(deal_with(HOLD_
 check("Ready for Ops -> confirmed", hold_sync.classify(deal_with(HS_READY_FOR_OPS_STAGE_ID, False)) == "confirmed")
 check("closed lost supersedes checkbox -> withdrawn",
       hold_sync.classify(deal_with(HS_LOST_STAGE_ID, True)) == "withdrawn")
-check("other stage -> noop", hold_sync.classify(deal_with("qualifiedtobuy", True)) == "noop")
+check("other stage -> noop", hold_sync.classify(deal_with("appointmentscheduled", True)) == "noop")
 
 # desired tags
 hold_tags = hold_sync.desired_tags("hold", ["White Glove", "B2B"])
