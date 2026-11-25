@@ -528,6 +528,21 @@ PIPE17_RFF_STATUS = os.environ.get("PIPE17_RFF_STATUS", "readyForFulfillment")
 PIPE17_HOLD_TAG = os.environ.get("PIPE17_HOLD_TAG", "B2BInventoryHold")
 PIPE17_CONFIRM_REVIEW_TAG = os.environ.get("PIPE17_CONFIRM_REVIEW_TAG", "B2BConfirmReview")
 
+# --- Committed / quote-signed ingestion ("Awaiting Payment") ----------------
+# A deal reaching a committed/quote-signed stage (below) is ingested automatically —
+# no inventory_hold_approved checkbox needed — so inventory is locked while payment is
+# pending. The order has the SAME shape as a hold (readyForFulfillment, off the Ops
+# board via B2BInventoryHold, inventory committed) but carries an extra "Awaiting
+# Payment" label + a payment-pending note. Ready for Ops later releases it (note
+# cleared, hold/awaiting tags dropped, Airtable + ConfirmReview added). B2BInventoryHold
+# stays as the functional guard so the existing Ops automation keeps the SRs parked —
+# no new Ops automation needed. Empty HS_COMMITTED_STAGE_IDS disables this path.
+HS_COMMITTED_STAGE_IDS = tuple(s for s in os.environ.get(
+    "HS_COMMITTED_STAGE_IDS", "1492994,1492995").split(",") if s)   # Committed Deal (90%), Deposit Invoice Sent (95%)
+PIPE17_AWAITING_PAYMENT_TAG = os.environ.get("PIPE17_AWAITING_PAYMENT_TAG", "Awaiting Payment")
+PIPE17_AWAITING_PAYMENT_NOTE = os.environ.get(
+    "PIPE17_AWAITING_PAYMENT_NOTE", "Proposal signed, invoice not yet paid. Do not process.")
+
 # Visible "do not release" note written onto a held Pipe17 order, on top of the tag
 # (Drew/Adam 10/27: a caps note so anyone opening the order sees it is not an active
 # order). Only set on HOLD creates; the confirmed/released transition leaves notes
@@ -557,6 +572,20 @@ HOLD_RFO_SLACK_ALERT = os.environ.get("HOLD_RFO_SLACK_ALERT", "true").lower() ==
 # — Pipe17 v3 has no dedicated cancel endpoint; status is a settable field on PUT.
 PIPE17_ORDER_UPDATE_PATH = os.environ.get("PIPE17_ORDER_UPDATE_PATH", "/orders/{id}")
 PIPE17_CANCELED_STATUS = os.environ.get("PIPE17_CANCELED_STATUS", "canceled")
+
+# --- Closed-lost cancellation sweep -----------------------------------------
+# When a deal goes closed lost, cancel its Pipe17 order(s) so inventory restocks —
+# but only if NOTHING has shipped. If any shipping request on the order is in one of
+# CANCEL_INFLIGHT_BLOCK_STATUSES, the order is left alone and Ops is alerted instead.
+# Gated OFF by default for staged rollout; when off, closed-lost keeps the legacy
+# behavior (cancel a still-held order only). The result is written back to the deal via
+# HS_CANCEL_RESULT_PROP (must be an existing deal property; empty = no writeback).
+CLOSED_LOST_CANCEL_ENABLED = os.environ.get("CLOSED_LOST_CANCEL_ENABLED", "false").lower() == "true"
+CANCEL_INFLIGHT_BLOCK_STATUSES = frozenset(
+    s.strip() for s in os.environ.get(
+        "CANCEL_INFLIGHT_BLOCK_STATUSES",
+        "sentToFulfillment,fulfilled,partialFulfillment").split(",") if s.strip())
+HS_CANCEL_RESULT_PROP = os.environ.get("HS_CANCEL_RESULT_PROP", "")  # e.g. "pipe17_order_status"
 
 # ===========================================================================
 # SO finance fields (Finance / Drew 10/27): carry FULL RETAIL unit prices at the

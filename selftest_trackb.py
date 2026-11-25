@@ -118,8 +118,8 @@ def deal_with(stage, approved, did="900001"):
 check("hold stage + checkbox -> hold", hold_sync.classify(deal_with(HOLD_STAGE, True)) == "hold")
 check("hold stage, no checkbox -> withdrawn", hold_sync.classify(deal_with(HOLD_STAGE, False)) == "withdrawn")
 check("Ready for Ops -> confirmed", hold_sync.classify(deal_with(HS_READY_FOR_OPS_STAGE_ID, False)) == "confirmed")
-check("closed lost supersedes checkbox -> withdrawn",
-      hold_sync.classify(deal_with(HS_LOST_STAGE_ID, True)) == "withdrawn")
+check("closed lost supersedes checkbox -> closed_lost",
+      hold_sync.classify(deal_with(HS_LOST_STAGE_ID, True)) == "closed_lost")
 check("other stage -> noop", hold_sync.classify(deal_with("appointmentscheduled", True)) == "noop")
 
 # desired tags
@@ -138,23 +138,30 @@ check("signature equal when identical", sigA == sigA2)
 check("signature differs on qty change", sigA != sigB)
 
 class FakeHS:
-    def __init__(self, lines): self.lines = lines; self.set_calls = []
+    def __init__(self, lines): self.lines = lines; self.set_calls = []; self.deal_updates = []
     def get_line_items(self, did): return self.lines
     def delivery_contact_of(self, did): return None
     def set_pipe17_order_id(self, did, oid): self.set_calls.append((did, oid))
+    def update_deal(self, did, props): self.deal_updates.append((did, props))
 
 class FakeP17:
-    def __init__(self, existing=None):
+    def __init__(self, existing=None, shipments=None, deal_orders=None):
         self.existing = existing; self.created = []; self.updated = []; self.cancelled = []
+        self._shipments = shipments if shipments is not None else []
+        self._deal_orders = deal_orders   # None -> derive from `existing`
     def get_order_by_ext_id(self, ext, key): return self.existing
     def create_order(self, body, key): self.created.append(body); return {"orderId": "OID123"}
     def update_order(self, oid, body, key): self.updated.append((oid, body)); return {}
     def cancel_order(self, oid, key): self.cancelled.append(oid); return {}
     def order_id_of(self, order): return (order or {}).get("orderId") or (order or {}).get("id")
+    def get_order_shipments(self, ext, key): return self._shipments
+    def find_orders_for_deal(self, did, prefix, key):
+        if self._deal_orders is not None: return self._deal_orders
+        return [self.existing] if self.existing else []
 
 KEYS = {"USD": "k", "CAD": "k"}
-def reconcile(deal, existing=None, dry_run=False):
-    hsf, p17 = FakeHS(HOLD_LINES), FakeP17(existing)
+def reconcile(deal, existing=None, dry_run=False, shipments=None, deal_orders=None):
+    hsf, p17 = FakeHS(HOLD_LINES), FakeP17(existing, shipments=shipments, deal_orders=deal_orders)
     res, ext = hold_sync.reconcile_deal(deal, hs=hsf, p17w=p17, key_map=KEYS,
                                         dry_run=dry_run, order_suffix="")
     return res, ext, hsf, p17
@@ -262,6 +269,108 @@ check("lost after release -> left alone (not cancelled)", res == "noop_released"
 # withdrawn with no order at all -> noop
 res, *_ = reconcile(deal_with(HOLD_STAGE, False), existing=None)
 check("withdrawn, no order -> noop", res == "noop")
+
+# ---------------------------------------------------------------------------
+print("3b) committed / quote-signed ingestion (awaiting_payment)")
+from config import (HS_COMMITTED_STAGE_IDS, PIPE17_AWAITING_PAYMENT_TAG,
+                    PIPE17_AWAITING_PAYMENT_NOTE)
+COMMITTED = HS_COMMITTED_STAGE_IDS[0]            # 1492994 Committed Deal (90%)
+COMMITTED2 = HS_COMMITTED_STAGE_IDS[-1]          # 1492995 Deposit Invoice Sent (95%)
+
+# classify: committed ingests with AND without the checkbox; 95% too.
+check("committed stage + checkbox -> awaiting_payment",
+      hold_sync.classify(deal_with(COMMITTED, True)) == "awaiting_payment")
+check("committed stage, NO checkbox -> awaiting_payment (auto)",
+      hold_sync.classify(deal_with(COMMITTED, False)) == "awaiting_payment")
+check("deposit-invoice-sent (95%) -> awaiting_payment",
+      hold_sync.classify(deal_with(COMMITTED2, False)) == "awaiting_payment")
+
+# CREATE: order shape = RFF, B2BInventoryHold + Awaiting Payment (no Airtable),
+# payment-pending note, inventory_hold=true.
+res, ext, hsf, p17 = reconcile(deal_with(COMMITTED, False))
+check("committed create -> created", res == "created")
+ap_body = p17.created[0]
+check("awaiting_payment status = readyForFulfillment", ap_body["status"] == PIPE17_RFF_STATUS)
+check("awaiting_payment tags: B2BInventoryHold + Awaiting Payment, no Airtable",
+      PIPE17_HOLD_TAG in ap_body["tags"] and PIPE17_AWAITING_PAYMENT_TAG in ap_body["tags"]
+      and PIPE17_AIRTABLE_TAG not in ap_body["tags"])
+check("awaiting_payment carries payment-pending note",
+      not PIPE17_AWAITING_PAYMENT_NOTE
+      or ap_body.get(PIPE17_HOLD_NOTE_FIELD) == PIPE17_AWAITING_PAYMENT_NOTE)
+check("awaiting_payment inventory_hold=true",
+      not PIPE17_HOLD_CF_NAME or _cf(ap_body, PIPE17_HOLD_CF_NAME) == PIPE17_HOLD_CF_HELD)
+
+# DEDUPE: an existing awaiting_payment order already matching -> unchanged, NO 2nd create.
+EXISTING_AP = {"orderId": "AP1", "status": PIPE17_RFF_STATUS,
+               "lineItems": EXISTING_HOLD["lineItems"],
+               "tags": ["White Glove", "B2B", PIPE17_HOLD_TAG, PIPE17_AWAITING_PAYMENT_TAG],
+               PIPE17_HOLD_NOTE_FIELD: PIPE17_AWAITING_PAYMENT_NOTE}
+res, _, _, p17 = reconcile(deal_with(COMMITTED, False), existing=EXISTING_AP)
+check("committed dedupe: matching order -> unchanged, no second create",
+      res == "unchanged" and not p17.created and not p17.updated)
+
+# An existing plain HOLD order converts to awaiting_payment in place at committed (no dup).
+res, _, _, p17 = reconcile(deal_with(COMMITTED, True), existing=EXISTING_HOLD)
+check("hold order -> committed converts in place (updated, no create)",
+      res == "updated" and not p17.created and len(p17.updated) == 1)
+_, conv = p17.updated[0]
+check("converted order gains Awaiting Payment + keeps B2BInventoryHold",
+      PIPE17_AWAITING_PAYMENT_TAG in conv["tags"] and PIPE17_HOLD_TAG in conv["tags"])
+check("converted order note swapped to payment-pending",
+      not PIPE17_AWAITING_PAYMENT_NOTE
+      or conv.get(PIPE17_HOLD_NOTE_FIELD) == PIPE17_AWAITING_PAYMENT_NOTE)
+
+# RELEASE: awaiting_payment -> Ready for Ops clears note, drops HOLD + Awaiting Payment,
+# adds Airtable + ConfirmReview.
+res, _, _, p17 = reconcile(deal_with(HS_READY_FOR_OPS_STAGE_ID, False), existing=EXISTING_AP)
+check("awaiting_payment -> RFO = updated", res == "updated")
+_, rel = p17.updated[0]
+check("RFO release: Airtable + ConfirmReview in; HOLD + Awaiting Payment out",
+      PIPE17_AIRTABLE_TAG in rel["tags"] and PIPE17_CONFIRM_REVIEW_TAG in rel["tags"]
+      and PIPE17_HOLD_TAG not in rel["tags"] and PIPE17_AWAITING_PAYMENT_TAG not in rel["tags"])
+check("RFO release clears the payment-pending note",
+      not PIPE17_AWAITING_PAYMENT_NOTE or rel.get(PIPE17_HOLD_NOTE_FIELD) == "")
+
+# CANADA mapping: a CAD deal at the committed stage -> #CEN order.
+cad_committed = {"id": "63327307681", "properties": {
+    "deal_currency_code": "CAD", "dealname": "Maple Co", "dealstage": COMMITTED}}
+res, ext_ca2, _, _ = reconcile(cad_committed)
+check("CAD committed -> #CEN extOrderId", res == "created" and ext_ca2 == "#CEN63327307681")
+
+# ---------------------------------------------------------------------------
+print("3c) closed-lost cancellation sweep (CLOSED_LOST_CANCEL_ENABLED)")
+hold_sync.CLOSED_LOST_CANCEL_ENABLED = True
+hold_sync.HS_CANCEL_RESULT_PROP = "pipe17_order_status"
+try:
+    lost = deal_with(HS_LOST_STAGE_ID, False)
+    # Nothing in flight -> cancel + write the result back to the deal.
+    res, _, hsf, p17 = reconcile(lost, existing=EXISTING_HOLD, shipments=[{"status": "reviewRequired"}])
+    check("closed lost, nothing shipped -> canceled", res == "canceled" and p17.cancelled == ["O1"])
+    check("closed lost cancel writes result back to the deal",
+          bool(hsf.deal_updates) and hsf.deal_updates[0][1].get("pipe17_order_status"))
+
+    # A shipment in flight -> do NOT cancel; alert Ops; still write back.
+    _slack.clear()
+    res, _, hsf, p17 = reconcile(lost, existing=EXISTING_HOLD,
+                                 shipments=[{"status": "sentToFulfillment", "shipmentId": "S1"}])
+    check("closed lost + in-flight SR -> NOT canceled", res == "blocked_inflight" and not p17.cancelled)
+    check("in-flight closed lost raises a Slack alert",
+          len(_slack) == 1 and "IN FLIGHT" in _slack[0])
+    check("in-flight closed lost writes result back to the deal", bool(hsf.deal_updates))
+
+    # Idempotent: an already-canceled order is not canceled again.
+    CANCELED = dict(EXISTING_HOLD, orderId="OC", status=hold_sync.PIPE17_CANCELED_STATUS)
+    res, _, _, p17 = reconcile(lost, existing=CANCELED, deal_orders=[CANCELED], shipments=[])
+    check("closed lost, order already canceled -> noop (idempotent)",
+          res == "noop" and not p17.cancelled)
+
+    # Dry-run does not cancel.
+    res, _, _, p17 = reconcile(lost, existing=EXISTING_HOLD, shipments=[], dry_run=True)
+    check("closed lost dry-run -> would_cancel, no cancel call",
+          res == "would_cancel" and not p17.cancelled)
+finally:
+    hold_sync.CLOSED_LOST_CANCEL_ENABLED = False
+    hold_sync.HS_CANCEL_RESULT_PROP = ""
 
 # ---------------------------------------------------------------------------
 print("4) SO retail pricing + order-level discount (gated SO_RETAIL_PRICING)")

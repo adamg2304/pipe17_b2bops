@@ -8,8 +8,9 @@ import time
 import requests
 
 from config import (
-    PIPE17_API_BASE, PIPE17_ORDERS_PATH,
+    PIPE17_API_BASE, PIPE17_ORDERS_PATH, PIPE17_SHIPMENTS_PATH,
     PIPE17_ORDER_UPDATE_PATH, PIPE17_CANCELED_STATUS,
+    PIPE17_ORDER_SOURCE, HS_DEAL_ID_CUSTOM_FIELD,
 )
 
 
@@ -77,8 +78,61 @@ def cancel_order(order_id, api_key):
     """Cancel a held order to release the committed inventory (deal lost / hold
     withdrawn before Ready for Ops). Pipe17 v3 has no dedicated cancel endpoint — the
     same PUT /orders/{id} sets status=canceled. Safe only pre-release (hold_sync guards
-    to orders still carrying the hold tag); a released order's 3PL shipment is not
+    on shipping-request status / the hold tag); a released order's 3PL shipment is not
     recalled by a status flip."""
     path = PIPE17_ORDER_UPDATE_PATH.format(id=order_id)
     resp = _request("PUT", path, api_key, body={"status": PIPE17_CANCELED_STATUS})
     return resp.get("order", resp)
+
+
+def get_order_shipments(ext_order_id, api_key):
+    """Every shipping request for one order (by external id), read with the order's own
+    channel key. Used by the closed-lost sweep to decide whether anything is in flight
+    before cancelling. Returns [] when the order has no SRs."""
+    if not ext_order_id:
+        return []
+    data = _request("GET", PIPE17_SHIPMENTS_PATH, api_key,
+                    params={"extOrderId": ext_order_id, "count": 100, "keys": "*"})
+    return data.get("shipments", []) or []
+
+
+def _deal_id_of(order):
+    for c in (order.get("customFields") or []):
+        if c.get("name") == HS_DEAL_ID_CUSTOM_FIELD:
+            return c.get("value")
+    return None
+
+
+def find_orders_for_deal(deal_id, prefix, api_key, max_scan=1000):
+    """All Pipe17 orders for a HubSpot deal: the base order (extOrderId = <prefix><dealId>)
+    plus any manual replacement that reuses that extOrderId with a suffix or carries the
+    same hubspot_deal_id custom field.
+
+    Pipe17's /orders filter matches extOrderId exactly, so the base is fetched exactly and
+    replacements are found by paging recent hubspot-source orders (newest first) and
+    prefix / custom-field matching, bounded by max_scan. The base order is always found via
+    the exact fetch regardless of age; only a replacement older than max_scan orders back
+    could be missed (rare, and the feature is gated for careful rollout)."""
+    base_ext = f"{prefix}{deal_id}"
+    found = {}
+    base = get_order_by_ext_id(base_ext, api_key)
+    if base:
+        found[order_id_of(base) or base_ext] = base
+    scanned = 0
+    skip = 0
+    while scanned < max_scan:
+        params = {"orderSource": PIPE17_ORDER_SOURCE, "count": 100, "skip": skip,
+                  "order": "createdAt:desc", "keys": "orderId,extOrderId,status,customFields"}
+        data = _request("GET", PIPE17_ORDERS_PATH, api_key, params=params)
+        orders = data.get("orders", []) or []
+        for o in orders:
+            o_ext = str(o.get("extOrderId") or "")
+            did = _deal_id_of(o)
+            if (o_ext != base_ext and o_ext.startswith(base_ext)) or (did and str(did) == str(deal_id)):
+                found[order_id_of(o) or o_ext] = o
+        scanned += len(orders)
+        info = data.get("pagination") or {}
+        if info.get("last") is True or len(orders) < 100:
+            break
+        skip += 100
+    return list(found.values())

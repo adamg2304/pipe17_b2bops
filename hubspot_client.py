@@ -10,7 +10,8 @@ from config import (
     HS_CURRENCY_PROP, HS_SHIP_ADDR_PROPS, HS_LI_PROPS,
     HS_DELIVERY_CONTACT_LABEL,
     HS_DEAL_STAGE_PROP, HS_INVENTORY_HOLD_PROP, HS_TAX_TOTAL_PROP,
-    HS_HOLD_STAGE_IDS, HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID,
+    HS_HOLD_STAGE_IDS, HS_COMMITTED_STAGE_IDS,
+    HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID,
 )
 
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
@@ -82,6 +83,39 @@ def find_hold_sync_deals(since_epoch_ms):
     paths all act on deals that already carry an order. Per-deal branching (create vs
     update vs cancel vs release vs noop) happens in hold_sync."""
     stages = list(HS_HOLD_STAGE_IDS) + [HS_READY_FOR_OPS_STAGE_ID, HS_LOST_STAGE_ID]
+    after = None
+    while True:
+        filters = [
+            {"propertyName": "dealstage", "operator": "IN", "values": stages},
+            {"propertyName": "hs_lastmodifieddate", "operator": "GTE", "value": since_epoch_ms},
+        ]
+        if HS_DEAL_PIPELINE_ID:
+            filters.append({"propertyName": "pipeline", "operator": "EQ", "value": HS_DEAL_PIPELINE_ID})
+        body = {
+            "filterGroups": [{"filters": filters}],
+            "properties": _deal_properties(),
+            "limit": 100,
+            "sorts": [{"propertyName": "hs_lastmodifieddate", "direction": "ASCENDING"}],
+        }
+        if after:
+            body["after"] = after
+        data = _request("POST", "/crm/v3/objects/deals/search", json=body)
+        for row in data.get("results", []):
+            yield row
+        after = (data.get("paging") or {}).get("next", {}).get("after")
+        if not after:
+            break
+        time.sleep(0.2)
+
+
+def find_committed_deals(since_epoch_ms=0):
+    """Deals currently at a committed / quote-signed stage (HS_COMMITTED_STAGE_IDS), for
+    the one-time backfill. since_epoch_ms defaults to 0 (all such deals); pass a window to
+    limit it. Like find_hold_sync_deals it does NOT filter out already-synced deals —
+    reconcile_deal dedupes (verifies/corrects the one order, never creates a second)."""
+    stages = list(HS_COMMITTED_STAGE_IDS)
+    if not stages:
+        return
     after = None
     while True:
         filters = [
