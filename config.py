@@ -586,6 +586,10 @@ CANCEL_INFLIGHT_BLOCK_STATUSES = frozenset(
         "CANCEL_INFLIGHT_BLOCK_STATUSES",
         "sentToFulfillment,fulfilled,partialFulfillment").split(",") if s.strip())
 HS_CANCEL_RESULT_PROP = os.environ.get("HS_CANCEL_RESULT_PROP", "")  # e.g. "pipe17_order_status"
+# Shopify cancellation is DEFERRED (not built here): first confirm whether a Pipe17 cancel
+# already propagates to the linked Shopify order via the connector. If it does NOT, the
+# follow-up build cancels the Shopify order with the Admin orderCancel mutation using
+# reason=OTHER and staffNote "Deal closed lost in HubSpot" (decided 2026-11-25), restock=true.
 
 # ===========================================================================
 # SO finance fields (Finance / Drew 10/27): carry FULL RETAIL unit prices at the
